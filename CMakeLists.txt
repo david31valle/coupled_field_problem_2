@@ -7,5 +7,7 @@ add_executable(coupled_field_problem_2
         main.cpp
         Eigen
         data.txt
-        test.txt
+        initialization
+        preprocess
+        node/node.hpp
 )

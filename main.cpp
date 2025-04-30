@@ -4,6 +4,8 @@
 #include <fstream>
 #include <vector>
 #include "Eigen/Dense"
+#include "preprocess/mesh.hpp"
+
 
 Eigen::VectorXd readVectorFromFile(const std::string& filename);
 
@@ -47,6 +49,11 @@ int main() {
 
     std::string plot_mesh = "Off";
 
+    switch (problem_dimension) {
+        case 1:
+            //auto [node_list, element_list]=generate_mesh(domain_size, partition, element_order, problem_dimension);
+
+    }
 
     return 0;
 }
