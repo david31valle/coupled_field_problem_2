@@ -2,33 +2,47 @@
 // Created by Maitreya Limkar on 17-02-2025.
 //
 
-#ifndef MESH_1D_HPP
-#define MESH_1D_HPP
+#pragma once
+
 #include "../Eigen/Dense"
 #include <vector>
+#include <tuple>
+#include <array>
 
 class Mesh_1D {
 public:
-    using NodeList_1D = Eigen::VectorXd;
-    using ElementList = Eigen::MatrixXd;
+    using Vector  = Eigen::VectorXd;
+    using Matrix = Eigen::MatrixXi;
 
-    Mesh_1D(double domain_size, int partition, const std::vector<int>& element_orders);
-    void generateMesh();
-    void printMesh() const;
-    [[nodiscard]] NodeList_1D getNodeList() const;
-    [[nodiscard]] std::vector<ElementList> getElementLists() const;
+    struct Result {
+        Vector NL;
+        std::vector<Matrix> EL;
+    };
+
+    Mesh_1D() = default;
+
+    Result generate(double domain_size,
+                    int partition,
+                    const std::vector<int>& element_orders) const;
 
 private:
-    double domain_size;
-    int partition;
-    std::vector<int> element_orders;
-    std::vector<NodeList_1D> node_lists;
-    std::vector<ElementList> element_lists;
-    NodeList_1D merged_node_list;
-
-    void generateIndividualMesh(int degree, NodeList_1D& nl, ElementList& el) const;
-    void mergeNodeLists();
-    void updateElementLists();
+    static void individual(double domain_size,
+                           int partition,
+                           int degree,
+                           Vector& NL,
+                           Matrix& EL);
 };
 
-#endif //MESH_1D_HPP
+std::pair<Mesh_1D::Vector, Mesh_1D::Matrix>
+mesh_1D(int PD, double domain_size, int partition, int order, bool plot_mesh=false);
+
+std::tuple<Mesh_1D::Vector, Mesh_1D::Matrix, Mesh_1D::Matrix>
+mesh_1D(int PD, double domain_size, int partition,
+        const std::array<int,2>& order, bool plot_mesh=false);
+
+std::tuple<Mesh_1D::Vector, Mesh_1D::Matrix, Mesh_1D::Matrix, Mesh_1D::Matrix>
+mesh_1D(int PD, double domain_size, int partition,
+        const std::array<int,3>& order, bool plot_mesh=false);
+
+void printMesh1D(const Mesh_1D::Vector& NL,
+                 const Mesh_1D::Matrix& EL);

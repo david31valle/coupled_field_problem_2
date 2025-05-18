@@ -2,45 +2,49 @@
 // Created by Maitreya Limkar on 17-02-2025.
 //
 
-#ifndef MESH_2D_HPP
-#define MESH_2D_HPP
+#pragma once
 
 #include "../Eigen/Dense"
 #include <vector>
+#include <tuple>
+#include <array>
 
-// Type aliases for clarity
-using NodeList_2D = Eigen::MatrixXd;
-using ElementList = Eigen::MatrixXd;
-
-// Mesh_2D class declaration
 class Mesh_2D {
 public:
-    // Constructor
-    Mesh_2D(double domain_size, int partition, const std::vector<int>& element_orders);
+    using NodeMat = Eigen::MatrixXd;   // (#nodes) x 2 matrix of (x,y)
+    using ElemMat = Eigen::MatrixXi;   // (#elements) x ((deg+1)^2) connectivity
 
-    // Main methods
-    void generateMesh();
-    void printMesh() const;
+    struct Result {
+        NodeMat           NL;   // global node list
+        std::vector<ElemMat> EL; // one connectivity matrix per requested order
+    };
 
-    // Accessors
-    [[nodiscard]] NodeList_2D getNodeList() const;
-    [[nodiscard]] std::vector<ElementList> getElementLists() const;
+    // Build and merge all requested polynomial‐order meshes
+    Result generate(double domain_size,
+                    int partition,
+                    const std::vector<int>& element_orders) const;
 
 private:
-    // Input parameters
-    double domain_size;
-    int partition;
-    std::vector<int> element_orders;
-
-    // Storage for mesh
-    std::vector<NodeList_2D> node_lists;        // Nodes for each element order
-    std::vector<ElementList> element_lists;  // Elements for each order
-    NodeList_2D merged_node_list;               // Combined node list
-
-    // Helper methods
-    void generateIndividualMesh(int degree, NodeList_2D& nl, ElementList& el) const;
-    void mergeNodeLists();
-    void updateElementLists();
+    // Build a single degree-`degree` mesh (0-based indexing)
+    void individual(double domain_size,
+                    int partition,
+                    int degree,
+                    NodeMat& NL,
+                    ElemMat& EL) const;
 };
 
-#endif //MESH_2D_HPP
+// MATLAB‐style free‐function overloads
+std::pair<Mesh_2D::NodeMat,Mesh_2D::ElemMat>
+mesh_2D(int PD, double domain_size, int partition, int order);
+
+std::tuple<Mesh_2D::NodeMat,Mesh_2D::ElemMat,Mesh_2D::ElemMat>
+mesh_2D(int PD, double domain_size, int partition,
+        const std::array<int,2>& orders);
+
+std::tuple<Mesh_2D::NodeMat,Mesh_2D::ElemMat,Mesh_2D::ElemMat,Mesh_2D::ElemMat>
+mesh_2D(int PD, double domain_size, int partition,
+        const std::array<int,3>& orders);
+
+// Printer (for debugging)
+void printMesh2D(const Mesh_2D::NodeMat& NL,
+                 const Mesh_2D::ElemMat& EL);
