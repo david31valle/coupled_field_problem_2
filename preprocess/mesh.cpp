@@ -2,57 +2,54 @@
 #include "mesh_1D.hpp"
 #include "mesh_2D.hpp"
 #include "mesh_3D.hpp"
-
-#include <array>
 #include <iostream>
 #include <stdexcept>
 
-std::pair<Eigen::MatrixXd, Eigen::MatrixXd>
+std::tuple<Eigen::MatrixXd, Eigen::MatrixXd, Eigen::MatrixXd>
 generate_mesh(int /*PD*/,
               double domain_size,
               int partition,
-              int element_order,
+              const std::vector<int>& element_orders,
               int problem_dimension)
 {
-    std::pair<Eigen::MatrixXd, Eigen::MatrixXd> generated_mesh;
+    Eigen::MatrixXd nl, el1, el2;
     try {
         switch (problem_dimension) {
-            case 1: {
-                // 1D
-                Mesh_1D mesh1d;
-                auto res1 = mesh1d.generate(domain_size, partition, {element_order});
-                printMesh1D(res1.NL, res1.EL[0]);
-                generated_mesh.first  = res1.NL;                        // N×1
-                generated_mesh.second = res1.EL[0].cast<double>();       // E×(order+1)
+        case 1: {
+                Mesh_1D m;
+                auto res = m.generate(domain_size, partition, {element_orders[0]});
+                printMesh1D(res.NL, res.EL[0]);
+                nl  = res.NL;
+                el1 = res.EL[0].cast<double>();
+                el2 = Eigen::MatrixXd();  // empty
                 break;
-            }
-            case 2: {
-                // 2D
-                Mesh_2D mesh2d;
-                std::vector<int> orders2 = {element_order, element_order};
-                auto res2 = mesh2d.generate(domain_size, partition, orders2);
-                printMesh2D(res2.NL, res2.EL[0]);
-                generated_mesh.first  = res2.NL;                         // N×2
-                generated_mesh.second = res2.EL[0].cast<double>();
+        }
+        case 2: {
+                Mesh_2D m;
+                std::vector<int> ord = { element_orders[0], element_orders[1] };
+                auto res = m.generate(domain_size, partition, ord);
+                printMesh2D(res.NL, res.EL[0]);
+                nl  = res.NL;
+                el1 = res.EL[0].cast<double>();
+                el2 = res.EL[1].cast<double>();
                 break;
-            }
-            case 3: {
-                    Mesh_3D mesh3d;
-                    std::vector<int> orders3 = {element_order, element_order, element_order};
-                    auto res3 = mesh3d.generate(domain_size, partition, orders3);
-                    printMesh3D(res3.NL, res3.EL[0]);
-                    generated_mesh.first  = res3.NL;                         // N×3
-                    generated_mesh.second = res3.EL[0].cast<double>();
+        }
+        case 3: {
+                Mesh_3D m;
+                std::vector<int> ord = { element_orders[0], element_orders[1], element_orders[2] };
+                auto res = m.generate(domain_size, partition, ord);
+                printMesh3D(res.NL, res.EL[0]);
+                nl  = res.NL;
+                el1 = res.EL[0].cast<double>();
+                el2 = res.EL[1].cast<double>();
                 break;
-            }
-            default:
-                throw std::invalid_argument(
-                    "Invalid problem dimension! Use 1 (1D), 2 (2D), or 3 (3D).");
+        }
+        default:
+            throw std::invalid_argument("problem_dimension must be 1,2, or 3");
         }
     }
     catch (const std::exception& e) {
-        std::cerr << "Mesh generation error: " << e.what() << std::endl;
-        // generated_mesh will be left empty if error
+        std::cerr << "Mesh generation error: " << e.what() << "\n";
     }
-    return generated_mesh;
+    return {nl, el1, el2};
 }

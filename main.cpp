@@ -2,16 +2,14 @@
 #include <fstream>
 #include <vector>
 #include <string>
-#include <stdexcept>
 #include <tuple>            // for std::tie
-#include "Eigen/Dense"
 #include "preprocess/mesh.hpp"
 
 
 int main() {
     // --- Problem setup ---
     int problem_dimension = 3;
-    std::array<int,2> element_order = {1, 1};  // only element_order[0] used in 1D
+    std::vector<int> element_order = { 1, 1, 1};  // {1} for 1D; {1, 1} for 2D, {1, 1, 1} for 3D
 
     int domain_size = 1;
     int partition   = 10;
@@ -40,8 +38,8 @@ int main() {
     std::string GP_vals            = "On";
     std::string plot_mesh          = "Off";
 
-    auto [nl, el] = generate_mesh(/*PD=*/0, domain_size, partition,
-                                                                element_order[0], problem_dimension);
+    auto [nl, el_1, el_2] = generate_mesh(/*PD=*/0, domain_size, partition,
+                                                                element_order, problem_dimension);
 
     return 0;
 }
