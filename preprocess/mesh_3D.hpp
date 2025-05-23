@@ -2,45 +2,49 @@
 // Created by Maitreya Limkar on 17-02-2025.
 //
 
-#ifndef MESH_3D_HPP
-#define MESH_3D_HPP
+#pragma once
 
 #include "../Eigen/Dense"
 #include <vector>
+#include <tuple>
+#include <array>
 
-// Type aliases for clarity
-using NodeList_3D = Eigen::MatrixXd;
-using ElementList = Eigen::MatrixXd;
-
-// Mesh_3D class declaration
 class Mesh_3D {
 public:
-    // Constructor
-    Mesh_3D(double domain_size, int partition, const std::vector<int>& element_orders);
+    using NodeMat = Eigen::MatrixXd;   // (#nodes) x 3
+    using ElemMat = Eigen::MatrixXi;   // (#elements) x ((deg+1)^3)
 
-    // Main methods
-    void generateMesh();
-    void printMesh() const;
+    struct Result {
+        NodeMat           NL;  // merged nodes
+        std::vector<ElemMat> EL; // one entry per degree
+    };
 
-    // Accessors
-    [[nodiscard]] NodeList_3D getNodeList() const;
-    [[nodiscard]] std::vector<ElementList> getElementLists() const;
+    // Build and merge meshes for each degree in element_orders
+    Result generate(double domain_size,
+                    int partition,
+                    const std::vector<int>& element_orders) const;
 
 private:
-    // Input parameters
-    double domain_size;
-    int partition;
-    std::vector<int> element_orders;
-
-    // Storage for mesh
-    std::vector<NodeList_3D> node_lists;        // Nodes for each element order
-    std::vector<ElementList> element_lists;     // Elements for each order
-    NodeList_3D merged_node_list;               // Combined node list
-
-    // Helper methods
-    void generateIndividualMesh(int degree, NodeList_3D& nl, ElementList& el) const;
-    void mergeNodeLists();
-    void updateElementLists();
+    // Build a single mesh with 0‐based indexing
+    void individual(double domain_size,
+                    int partition,
+                    int degree,
+                    NodeMat& NL,
+                    ElemMat& EL) const;
 };
 
-#endif //MESH_3D_HPP
+// MATLAB‐style overloads
+std::pair<Mesh_3D::NodeMat,Mesh_3D::ElemMat>
+mesh_3D(int PD, double domain_size, int partition, int order);
+
+std::tuple<Mesh_3D::NodeMat,Mesh_3D::ElemMat,Mesh_3D::ElemMat>
+mesh_3D(int PD, double domain_size, int partition,
+        const std::array<int,2>& orders);
+
+std::tuple<Mesh_3D::NodeMat,Mesh_3D::ElemMat,Mesh_3D::ElemMat,Mesh_3D::ElemMat>
+mesh_3D(int PD, double domain_size, int partition,
+        const std::array<int,3>& orders);
+
+// Debug printer
+void printMesh3D(const Mesh_3D::NodeMat& NL,
+                 const Mesh_3D::ElemMat& EL);
