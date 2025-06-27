@@ -1,89 +1,40 @@
+#include "Node.hpp"
 
+Node::Node(int Nr, int PD, const Eigen::VectorXd& X_input,
+           const Eigen::VectorXd& C, const Eigen::VectorXd& V,
+           const Eigen::MatrixXd& EIL1, const Eigen::MatrixXd& EIL2,
+           const Eigen::VectorXd& field_input, const Eigen::Vector2i& field_dim)
+{
+    this->Nr = Nr;
+    this->PD = PD;
 
-#include "node.hpp"
+    X = X_input;
+    x = X_input;
 
-node::node(int node_number, int problem_dimension,  Eigen::VectorXd X_material_position,
-           Eigen::VectorXd x_spatial_position, std::vector<int> element_list) {
-    this->node_number = node_number;
-    this->problem_dimension = problem_dimension;
+    int uvSize = C.size() + V.size();
+    U = Eigen::VectorXd(uvSize);
+    u = Eigen::VectorXd(uvSize);
+    un = Eigen::VectorXd(uvSize);
 
-    // Resize member vectors and assign passed values
-    this->X_material_position.resize(problem_dimension, problem_dimension);
-    this->X_material_position = X_material_position;
+    U << C, V;
+    u << C, V;
+    un << C, V;
 
-    this->x_spatial_position.resize(problem_dimension, problem_dimension);
-    this->x_spatial_position = x_spatial_position;
+    this -> EIL_1 = EIL1;
+    this -> EIL_2 = EIL2;
 
-    this->element_list=element_list;
+    BC = Eigen::VectorXd(field_dim[0] + field_dim[1]);
+    BC.head(field_dim[0]) = Eigen::VectorXd::Ones(field_dim[0]) * field_input[0];
+    BC.tail(field_dim[1]) = Eigen::VectorXd::Ones(field_dim[1]) * field_input[1];
 
-    initialization(problem_dimension);
+    DOF = Eigen::VectorXd::Zero(BC.size());
 
-}
+    field = field_input;
 
-void node::initialization(int PD) {
-    boundary_condition.resize(PD);
-    boundary_condition.setOnes();
-
-    boundary_condition_value.resize(PD);
-    boundary_condition_value.setZero();
-
-    DOF.resize(PD);
-    DOF.setZero();
-
-    degree_constrained.resize(PD);
-    degree_constrained.setZero();
-
-    global_index.resize(PD);
-    global_index.setZero();
-
-    size_t size = PD * PD + PD * PD;
-
-    gauss_point_BC.resize(size);
-    gauss_point_BC.setOnes();
-
-    gauss_point_DOF.resize(size);
-    gauss_point_DOF.setZero();
-
-    gauss_point_values.resize(size);
-    gauss_point_values.setZero();
-}
-
-void node::printNodeData() const {
-    std::cout << "Node Number: " << node_number << std::endl;
-    std::cout << "Problem Dimension: " << problem_dimension << std::endl;
-
-    std::cout << "Material Position (X):" << std::endl;
-    std::cout << X_material_position << std::endl;
-
-    std::cout << "Spatial Position (x):" << std::endl;
-    std::cout << x_spatial_position << std::endl;
-
-    std::cout << "Element List: ";
-    for (const auto& elem : element_list) {
-        std::cout << elem << " ";
-    }
-    std::cout << std::endl;
-
-    std::cout << "Boundary Conditions:" << std::endl;
-    std::cout << boundary_condition.transpose() << std::endl;
-
-    std::cout << "Boundary Condition Values:" << std::endl;
-    std::cout << boundary_condition_value.transpose() << std::endl;
-
-    std::cout << "Degrees of Freedom (DOF):" << std::endl;
-    std::cout << DOF.transpose() << std::endl;
-
-    std::cout << "Degree Constrained:" << std::endl;
-    std::cout << degree_constrained.transpose() << std::endl;
-
-    std::cout << "Global Indices:" << std::endl;
-    std::cout << global_index.transpose() << std::endl;
-
-    std::cout << "Element List: ";
-    for (const auto& elem : element_list) {
-        std::cout << elem << " ";
-    }
-    std::cout << std::endl;
+    int gp_size = PD * PD;
+    GP_BC   = Eigen::VectorXd::Ones(gp_size) * field_input[0];
+    GP_DOF  = Eigen::VectorXd::Zero(gp_size);
+    GP_vals = Eigen::VectorXd::Zero(gp_size);
 }
 
 

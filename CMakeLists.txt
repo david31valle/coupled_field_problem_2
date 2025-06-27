@@ -18,4 +18,7 @@ add_executable(coupled_field_problem_2
         preprocess/mesh_2D.hpp
         preprocess/mesh_3D.cpp
         preprocess/mesh_3D.hpp
+        node/node.cpp
+        element/element.cpp
+        utils/utils.cpp
 )

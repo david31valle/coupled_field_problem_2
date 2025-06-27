@@ -5,7 +5,7 @@
 #include <iostream>
 #include <stdexcept>
 
-std::tuple<Eigen::MatrixXd, Eigen::MatrixXd, Eigen::MatrixXd>
+std::tuple<Eigen::MatrixXd,  std::vector<Eigen::MatrixXd> >
 generate_mesh(int /*PD*/,
               double domain_size,
               int partition,
@@ -21,7 +21,7 @@ generate_mesh(int /*PD*/,
                 printMesh1D(res.NL, res.EL[0]);
                 nl  = res.NL;
                 el1 = res.EL[0].cast<double>();
-                el2 = Eigen::MatrixXd();  // empty
+                el2 = res.EL[0].cast<double>();  // empty
                 break;
         }
         case 2: {
@@ -51,5 +51,14 @@ generate_mesh(int /*PD*/,
     catch (const std::exception& e) {
         std::cerr << "Mesh generation error: " << e.what() << "\n";
     }
-    return {nl, el1, el2};
+    std::vector<Eigen::MatrixXd> Element_lists;
+    Element_lists.push_back(el1);
+    Element_lists.push_back(el2);
+    std::cout<<"testin"<<std::endl;
+    std::cout<<el1<<std::endl;
+    std::cout<<"Testing el2"<<std::endl;
+    std::cout<<el2<<std::endl;
+
+
+    return {nl, Element_lists};
 }

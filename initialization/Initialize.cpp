@@ -1,90 +1,95 @@
+#include "Initialize.hpp"
+#include <random>
 
 #include "Initialize.hpp"
+#include <random>
 
+std::pair<std::vector<Node>, std::vector<element>>
+Initialize(int PD, const Eigen::MatrixXd &nl, const Eigen::MatrixXi &el_1, const Eigen::MatrixXi &el_2,
+           double domain_size, double C_initial, double C_perturb, const Eigen::VectorXd &Density,
+           const Eigen::VectorXd &Velocity, const std::string &Initial_density,
+           const std::pair<int, int> &element_order, const Eigen::Vector2i &field_dim,
+           const std::vector<double> &parameters) {
 
-std::pair<std::vector<node>, std::vector<element>>
-initialize(int problem_dimension, Eigen::MatrixXd &node_list, Eigen::MatrixXd &element_list, int domain_size,
-           int element_order, double lamda, double mu) {
-    double tol = 1e-6;
+    const double tol = 1e-6;
+    int NoN = nl.rows();
+    int NoE = el_1.rows();
     int NGP = 0;
-    int number_of_nodes=node_list.rows();
-    int number_of_elements=element_list.rows();
-    int nodes_per_elements=element_list.cols();
 
-    switch (problem_dimension) {
-        case 1:
-            switch (element_order) {
-                case 1: NGP = 2; break;
-                case 2: NGP = 3; break;
-                case 3: NGP = 4; break;
-                case 4: NGP = 5; break;
-                default: std::cerr << "Invalid element_order for PD=1\n"; break;
-            }
-            break;
-        case 2:
-            switch (element_order) {
-                case 1: NGP = 4; break;
-                case 2: NGP = 9; break;
-                case 3: NGP = 16; break;
-                case 4: NGP = 25; break;
-                default: std::cerr << "Invalid element_order for PD=2\n"; break;
-            }
-            break;
-        case 3:
-            switch (element_order) {
-                case 1: NGP = 8; break;
-                case 2: NGP = 27; break;
-                case 3: NGP = 64; break;
-                case 4: NGP = 125; break;
-                default: std::cerr << "Invalid element_order for PD=3\n"; break;
-            }
-            break;
-        default:
-            std::cerr << "Invalid PD value\n";
-            break;
+    switch (PD) {
+        case 1: NGP = std::vector<int>{2, 3, 4, 5}[std::max(element_order.first, element_order.second) - 1]; break;
+        case 2: NGP = std::vector<int>{4, 9, 16, 25}[std::max(element_order.first, element_order.second) - 1]; break;
+        case 3: NGP = std::vector<int>{8, 27, 64, 125}[std::max(element_order.first, element_order.second) - 1]; break;
     }
 
-    int rows = element_list.rows();
-    int cols = element_list.cols();
+    std::vector<Node> NL;
+    NL.reserve(NoN);
 
-    std::vector<node> Node_List;
+    int densityCounter = 0;
+    std::default_random_engine generator;
+    std::uniform_real_distribution<double> distribution(-C_perturb, C_perturb);
 
-    for (int i = 0; i < number_of_nodes; ++i) {
-        // Find all occurrences of 'i+1' in 'element_list'
-        std::vector<int> element_indices;
-        for (int row = 0; row < rows ; ++row) {
-            for (int col = 0; col < cols; ++col) {
-                if (element_list(row, col) == i+1) {
-                    element_indices.push_back(col*rows+row);  // Store element index
-                }
-            }
-        }
-        Eigen::VectorXd X = node_list.row(i);
-        Node_List.push_back(node(i, problem_dimension, X, X, element_indices));
-    }
+    for (int i = 0; i < NoN; ++i) {
+        Eigen::VectorXd X = nl.row(i);
 
-    std::vector<element> Element_List;
+        Eigen::Vector2d field;
+        field << (el_1.array() == (i + 1)).any(), (el_2.array() == (i + 1)).any();
 
-    for (int i = 0; i < number_of_elements; ++i) {
-        Eigen::MatrixXd X = Eigen::MatrixXd::Zero(problem_dimension, nodes_per_elements);  // Initialize (PD x NPE) matrix
-
-        Eigen::MatrixXd NdL = element_list.row(i);  // Extract node indices for element i
-
-        // Iterate over nodes in the element
-        for (int j = 0; j < nodes_per_elements; ++j) {
-            X.col(j) = Node_List[NdL(j)].X_material_position;  // Assign node coordinates (assuming NL[j].X is an Eigen::VectorXd)
+        std::vector<int> ElL_1_vec, ElL_2_vec;
+        for (int el = 0; el < NoE; ++el) {
+            if ((el_1.row(el).array() == i + 1).any()) ElL_1_vec.push_back(el);
+            if ((el_2.row(el).array() == i + 1).any()) ElL_2_vec.push_back(el);
         }
 
-        Eigen::MatrixXd x = X;  // Equivalent to 'x = X' in MATLAB
+        Eigen::MatrixXd ElL_1(ElL_1_vec.size(), 1);
+        Eigen::MatrixXd ElL_2(ElL_2_vec.size(), 1);
+        for (size_t k = 0; k < ElL_1_vec.size(); ++k) ElL_1(k, 0) = ElL_1_vec[k];
+        for (size_t k = 0; k < ElL_2_vec.size(); ++k) ElL_2(k, 0) = ElL_2_vec[k];
 
-        // Create and store the element
-        element test=element(i, problem_dimension, NdL, X, x, NGP, element_order, lamda, mu);
-        Element_List.push_back(element(i, problem_dimension, NdL, X, x, NGP, element_order, lamda, mu));
-        ;
+        double C = 0.0;
+        Eigen::VectorXd V = Eigen::VectorXd::Zero(PD);
+
+        if (field(0)) {
+            densityCounter++;
+            if (Initial_density == "Random") {
+                C = C_initial + distribution(generator);
+            } else if (Initial_density == "Sin") {
+                C = 3 + 0.1 * sin(2 * M_PI * X(0));
+            } else if (Initial_density == "Bubble") {
+                Eigen::VectorXd center = Eigen::VectorXd::Constant(PD, domain_size / 2.0);
+                double R = domain_size / 4.0;
+                if ((X - center).squaredNorm() - R * R < tol) C = C_initial + C_perturb;
+                else C = C_initial;
+            } else if (Initial_density == "Preload") {
+                C = Density(densityCounter - 1);
+            }
+        }
+
+        NL.emplace_back(i, PD, X, Eigen::VectorXd::Constant(1, C), V,
+                        ElL_1, ElL_2, field, field_dim);
     }
 
-    std::pair<std::vector<node>, std::vector<element>> node_and_element_list;
-    node_and_element_list.first=Node_List;
-    node_and_element_list.second=Element_List;
-    return node_and_element_list;
+    std::vector<element> EL;
+    EL.reserve(NoE);
+
+    for (int i = 0; i < NoE; ++i) {
+        Eigen::VectorXi NdL_1 = el_1.row(i);
+        Eigen::VectorXi NdL_2 = el_2.row(i);
+
+        Eigen::MatrixXd X(PD, NdL_2.size());
+        Eigen::VectorXd C(NdL_1.size());
+        Eigen::MatrixXd V(PD, NdL_2.size());
+
+        for (int j = 0; j < NdL_2.size(); ++j) {
+            X.col(j) = NL[NdL_2(j) - 1].X;
+            V.col(j) = NL[NdL_2(j) - 1].U.segment(1, PD);
+        }
+
+        for (int j = 0; j < NdL_1.size(); ++j)
+            C(j) = NL[NdL_1(j) - 1].U(0);
+
+        EL.emplace_back(i, PD, NdL_1, NdL_2, X, C, V, NGP, element_order, parameters);
+    }
+
+    return {NL, EL};
 }

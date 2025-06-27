@@ -9,14 +9,20 @@
 #include "../element/element.hpp"
 
 
-std::pair<std::vector<node>, std::vector<element>> initialize(int problem_dimension,
-                                                      Eigen::MatrixXd& node_list,
-                                                      Eigen::MatrixXd& element_list,
-                                                      int domain_size,
-                                                      int element_order,
-                                                      double lamda,
-                                                      double mu
-);
+std::pair<std::vector<Node>, std::vector<element>>
+Initialize(int PD,
+           const Eigen::MatrixXd &nl,
+           const Eigen::MatrixXi &el_1,
+           const Eigen::MatrixXi &el_2,
+           double domain_size,
+           double C_initial,
+           double C_perturb,
+           const Eigen::VectorXd &Density,
+           const Eigen::VectorXd &Velocity,
+           const std::string &Initial_density,
+           const std::pair<int, int> &element_order,
+           const Eigen::Vector2i &field_dim,
+           const std::vector<double> &parameters);
 
 
 

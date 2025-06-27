@@ -1,48 +1,33 @@
-
-// example of usage: Eigen::VectorXd X_material_position(problem_dimension);
-//    Eigen::VectorXd x_spatial_position(problem_dimension);
-//    Eigen::VectorXd element_list(5); // Assuming 5 elements are associated
-//
-//    X_material_position(0)= 1.0;  // Example material position
-//    x_spatial_position(0)=1.1;  // Example spatial position
-//    element_list(0)=0;        // Example element list
-//
-//    // Create an instance of the `node` class
-//    node myNode(2, problem_dimension, X_material_position, x_spatial_position, element_list);
-//
-
-#ifndef PROGRAMMING_PROJECT_NODE_HPP
-#define PROGRAMMING_PROJECT_NODE_HPP
+#pragma once
 #include "../Eigen/Dense"
-#include <iostream>
-#include <vector>
+#include <array>
 
-class node {
+class Node {
 public:
-    //Constructor
-    node(int node_number, int problem_dimension, Eigen::VectorXd X_material_position, Eigen::VectorXd x_spatial_configuration, std::vector<int> element_list);
+    int PD;                    // Problem dimension
+    int Nr;                    // Node number
 
-    int problem_dimension;
-    int node_number;
-    Eigen::MatrixXd X_material_position;
-    Eigen::MatrixXd x_spatial_position;
-    std::vector<int> element_list;
-    Eigen::VectorXd boundary_condition;
-    Eigen::VectorXd boundary_condition_value;
-    Eigen::VectorXd DOF;
-    Eigen::VectorXd degree_constrained;
-    Eigen::VectorXd global_index;
+    Eigen::VectorXd X;         // Material position
+    Eigen::VectorXd x;         // Spatial position
+    Eigen::VectorXd U;         // Unknowns (material config)
+    Eigen::VectorXd u;         // Unknowns (spatial config)
+    Eigen::VectorXd un;        // Previous unknowns (spatial config)
 
+    Eigen::MatrixXd EIL_1;     // Element list 1
+    Eigen::MatrixXd EIL_2;     // Element list 2
 
-    Eigen::VectorXd gauss_point_BC;
-    Eigen::VectorXd gauss_point_DOF;
-    Eigen::VectorXd gauss_point_values;
-    void printNodeData() const;
+    Eigen::VectorXd BC;        // Boundary condition vector
+    Eigen::VectorXd DOF;       // Degrees of freedom vector
 
-private:
-    void initialization(int PD);
+    Eigen::VectorXd field;     // Indicates which fields the node carries (2-element vector)
 
+    Eigen::VectorXd GP_BC;     // Gauss point boundary conditions
+    Eigen::VectorXd GP_DOF;    // Gauss point DOFs
+    Eigen::VectorXd GP_vals;   // Gauss point values
+
+    // Constructor
+    Node(int Nr, int PD, const Eigen::VectorXd& X_input,
+         const Eigen::VectorXd& C, const Eigen::VectorXd& V,
+         const Eigen::MatrixXd& EIL1, const Eigen::MatrixXd& EIL2,
+         const Eigen::VectorXd& field_input, const Eigen::Vector2i& field_dim);
 };
-
-
-#endif //PROGRAMMING_PROJECT_NODE_HPP

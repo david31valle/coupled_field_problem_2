@@ -2,17 +2,18 @@
 #include <fstream>
 #include <vector>
 #include <string>
-#include <tuple>            // for std::tie
+#include <tuple>
 #include "preprocess/mesh.hpp"
+#include "initialization/initialize.hpp"
 
 
 int main() {
     // --- Problem setup ---
-    int problem_dimension = 3;
-    std::vector<int> element_order = { 1, 1, 1};  // {1} for 1D; {1, 1} for 2D, {1, 1, 1} for 3D
+    int problem_dimension = 2;
+    std::vector<int> element_order = { 2,1};  // {1} for 1D; {1, 1} for 2D, {1, 1, 1} for 3D
 
     int domain_size = 1;
-    int partition   = 10;
+    int partition   = 5;
 
     // (Other simulation parameters can go here, if needed)
     std::string initial_density           = "Two-Bubble";
@@ -38,8 +39,11 @@ int main() {
     std::string GP_vals            = "On";
     std::string plot_mesh          = "Off";
 
-    auto [nl, el_1, el_2] = generate_mesh(/*PD=*/0, domain_size, partition,
+    auto [nl, element_lists] = generate_mesh(/*PD=*/0, domain_size, partition,
                                                                 element_order, problem_dimension);
+
+    Initialize(problem_dimension, nl, element_lists[0], element_lists[1], domain_size, initial_cell_density, cell_density_perturbation, initial_density, )
+
 
     return 0;
 }
