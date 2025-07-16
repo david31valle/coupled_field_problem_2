@@ -14,8 +14,8 @@ public:
     int Nr;         // Element number
     int PD;         // Problem dimension (2D/3D)
 
-    Eigen::VectorXi NdL1;  // Node list for scalar field
-    Eigen::VectorXi NdL2;  // Node list for vector field
+    Eigen::VectorXd NdL1;  // Node list for scalar field
+    Eigen::VectorXd NdL2;  // Node list for vector field
 
     int NPE1;       // Nodes per element for scalar field
     int NPE2;       // Nodes per element for vector field
@@ -46,8 +46,8 @@ public:
 
     // === Constructor ===
     element(int Nr, int PD,
-            const Eigen::VectorXi& NdL1,
-            const Eigen::VectorXi& NdL2,
+            const Eigen::VectorXd& NdL1,
+            const Eigen::VectorXd& NdL2,
             const Eigen::MatrixXd& X,
             const Eigen::VectorXd& C,
             const Eigen::MatrixXd& V,

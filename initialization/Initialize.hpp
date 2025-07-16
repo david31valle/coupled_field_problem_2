@@ -12,15 +12,15 @@
 std::pair<std::vector<Node>, std::vector<element>>
 Initialize(int PD,
            const Eigen::MatrixXd &nl,
-           const Eigen::MatrixXi &el_1,
-           const Eigen::MatrixXi &el_2,
+           const Eigen::MatrixXd &el_1,
+           const Eigen::MatrixXd &el_2,
            double domain_size,
            double C_initial,
            double C_perturb,
            const Eigen::VectorXd &Density,
            const Eigen::VectorXd &Velocity,
            const std::string &Initial_density,
-           const std::pair<int, int> &element_order,
+           const std::vector<int> &element_order,
            const Eigen::Vector2i &field_dim,
            const std::vector<double> &parameters);
 

@@ -14,8 +14,8 @@
 #include "../utils/utils.hpp"  // compute_gp, compute_N_xi_gp, printMatrix
 
 element::element(int Nr, int PD,
-                 const Eigen::VectorXi& NdL1,
-                 const Eigen::VectorXi& NdL2,
+                 const Eigen::VectorXd& NdL1,
+                 const Eigen::VectorXd& NdL2,
                  const Eigen::MatrixXd& X,
                  const Eigen::VectorXd& C,
                  const Eigen::MatrixXd& V,

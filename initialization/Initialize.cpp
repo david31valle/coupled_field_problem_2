@@ -5,10 +5,10 @@
 #include <random>
 
 std::pair<std::vector<Node>, std::vector<element>>
-Initialize(int PD, const Eigen::MatrixXd &nl, const Eigen::MatrixXi &el_1, const Eigen::MatrixXi &el_2,
+Initialize(int PD, const Eigen::MatrixXd &nl, const Eigen::MatrixXd &el_1, const Eigen::MatrixXd &el_2,
            double domain_size, double C_initial, double C_perturb, const Eigen::VectorXd &Density,
            const Eigen::VectorXd &Velocity, const std::string &Initial_density,
-           const std::pair<int, int> &element_order, const Eigen::Vector2i &field_dim,
+           const std::vector<int> &element_order, const Eigen::Vector2i &field_dim,
            const std::vector<double> &parameters) {
 
     const double tol = 1e-6;
@@ -17,9 +17,9 @@ Initialize(int PD, const Eigen::MatrixXd &nl, const Eigen::MatrixXi &el_1, const
     int NGP = 0;
 
     switch (PD) {
-        case 1: NGP = std::vector<int>{2, 3, 4, 5}[std::max(element_order.first, element_order.second) - 1]; break;
-        case 2: NGP = std::vector<int>{4, 9, 16, 25}[std::max(element_order.first, element_order.second) - 1]; break;
-        case 3: NGP = std::vector<int>{8, 27, 64, 125}[std::max(element_order.first, element_order.second) - 1]; break;
+        case 1: NGP = std::vector<int>{2, 3, 4, 5}[std::max(element_order[0], element_order[1]) - 1]; break;
+        case 2: NGP = std::vector<int>{4, 9, 16, 25}[std::max(element_order[0], element_order[1]) - 1]; break;
+        case 3: NGP = std::vector<int>{8, 27, 64, 125}[std::max(element_order[0], element_order[1]) - 1]; break;
     }
 
     std::vector<Node> NL;
@@ -73,8 +73,8 @@ Initialize(int PD, const Eigen::MatrixXd &nl, const Eigen::MatrixXi &el_1, const
     EL.reserve(NoE);
 
     for (int i = 0; i < NoE; ++i) {
-        Eigen::VectorXi NdL_1 = el_1.row(i);
-        Eigen::VectorXi NdL_2 = el_2.row(i);
+        Eigen::VectorXd NdL_1 = el_1.row(i);
+        Eigen::VectorXd NdL_2 = el_2.row(i);
 
         Eigen::MatrixXd X(PD, NdL_2.size());
         Eigen::VectorXd C(NdL_1.size());
@@ -88,7 +88,8 @@ Initialize(int PD, const Eigen::MatrixXd &nl, const Eigen::MatrixXi &el_1, const
         for (int j = 0; j < NdL_1.size(); ++j)
             C(j) = NL[NdL_1(j) - 1].U(0);
 
-        EL.emplace_back(i, PD, NdL_1, NdL_2, X, C, V, NGP, element_order, parameters);
+        std::pair<int, int> temp_element_order={element_order[0], element_order[1]};
+        EL.emplace_back(i, PD, NdL_1, NdL_2, X, C, V, NGP, temp_element_order, parameters);
     }
 
     return {NL, EL};

@@ -4411,3 +4411,26 @@ void printMatrix(const std::vector<std::vector<double>>& matrix, const std::stri
     }
     std::cout << std::endl;
 }
+
+Eigen::VectorXd readVectorFromFile(const std::string& filename) {
+    std::ifstream infile(filename);
+    if (!infile) {
+        throw std::runtime_error("Error opening file: " + filename);
+    }
+
+    std::vector<double> values;
+    double val;
+
+    while (infile >> val) {
+        values.push_back(val);
+    }
+
+    infile.close(); // ✅ Always close the file
+
+    Eigen::VectorXd vec(values.size());
+    for (size_t i = 0; i < values.size(); ++i) {
+        vec(i) = values[i];
+    }
+
+    return vec;
+}

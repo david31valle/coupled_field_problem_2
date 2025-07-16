@@ -5,13 +5,17 @@
 #include <tuple>
 #include "preprocess/mesh.hpp"
 #include "initialization/initialize.hpp"
-
+#include "utils/utils.hpp"
+#include "problem/problem.hpp"
 
 int main() {
     // --- Problem setup ---
     int problem_dimension = 2;
     std::vector<int> element_order = { 2,1};  // {1} for 1D; {1, 1} for 2D, {1, 1, 1} for 3D
+    Eigen::Vector2i field_dim ={1, problem_dimension};
 
+    Eigen::VectorXd Density = readVectorFromFile("C:\\Users\\drva_\\CLionProjects\\coupled_field_problem_2\\data.txt");
+    Eigen::VectorXd Velocity=Density;
     int domain_size = 1;
     int partition   = 5;
 
@@ -23,10 +27,7 @@ int main() {
     double      cell_radius               = 1.0;
     double      friction_coefficient      = 10.0;
 
-    Eigen::VectorXd parameters(3);
-    parameters << young_modulus,
-                  cell_radius,
-                  cell_density_perturbation;
+    std::vector<double> parameters ={young_modulus, cell_radius, cell_density_perturbation};
 
     double T                       = 1e4;
     double dt                      = 0.02;
@@ -42,8 +43,8 @@ int main() {
     auto [nl, element_lists] = generate_mesh(/*PD=*/0, domain_size, partition,
                                                                 element_order, problem_dimension);
 
-    Initialize(problem_dimension, nl, element_lists[0], element_lists[1], domain_size, initial_cell_density, cell_density_perturbation, initial_density, )
+    Initialize(problem_dimension, nl, element_lists[0], element_lists[1], domain_size, initial_cell_density, cell_density_perturbation, Density, Velocity, initial_density,element_order, field_dim, parameters );
 
-
+    //problem_coupled coupled_problem(problem_dimension, NL, EL, domain_size, boundary_condition,  Eigen::MatrixXd(), initial_density, parameters,  element_order, field_dim, GP_vals, time_increment, T, dt, time_factor, max_iter, tol );
     return 0;
 }

@@ -21,4 +21,10 @@ add_executable(coupled_field_problem_2
         node/node.cpp
         element/element.cpp
         utils/utils.cpp
+        initialization/Initialize.hpp
+        initialization/Initialize.cpp
+        problem/problem.hpp
+        problem/problem.cpp
+        problem/problem.cpp
+
 )
