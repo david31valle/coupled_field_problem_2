@@ -12,6 +12,9 @@ generate_mesh(int /*PD*/,
               const std::vector<int>& element_orders,
               int problem_dimension)
 {
+    //if element_orde[0]==element_order[1]{Calculate one}
+    //else{what you have done}
+
     Eigen::MatrixXd nl, el1, el2;
     try {
         switch (problem_dimension) {
@@ -54,10 +57,6 @@ generate_mesh(int /*PD*/,
     std::vector<Eigen::MatrixXd> Element_lists;
     Element_lists.push_back(el1);
     Element_lists.push_back(el2);
-    std::cout<<"testin"<<std::endl;
-    std::cout<<el1<<std::endl;
-    std::cout<<"Testing el2"<<std::endl;
-    std::cout<<el2<<std::endl;
 
 
     return {nl, Element_lists};

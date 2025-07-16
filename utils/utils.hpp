@@ -1,6 +1,3 @@
-//
-// Created by David Valle on 28-Jan-25.
-//
 
 #ifndef PROGRAMMING_PROJECT_UTILS_HPP
 #define PROGRAMMING_PROJECT_UTILS_HPP
