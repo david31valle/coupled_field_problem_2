@@ -43,8 +43,8 @@ int main() {
     auto [nl, element_lists] = generate_mesh(/*PD=*/0, domain_size, partition,
                                                                 element_order, problem_dimension);
 
-    Initialize(problem_dimension, nl, element_lists[0], element_lists[1], domain_size, initial_cell_density, cell_density_perturbation, Density, Velocity, initial_density,element_order, field_dim, parameters );
+    auto [NL, EL]= Initialize(problem_dimension, nl, element_lists[0], element_lists[1], domain_size, initial_cell_density, cell_density_perturbation, Density, Velocity, initial_density,element_order, field_dim, parameters );
 
-    //problem_coupled coupled_problem(problem_dimension, NL, EL, domain_size, boundary_condition,  Eigen::MatrixXd(), initial_density, parameters,  element_order, field_dim, GP_vals, time_increment, T, dt, time_factor, max_iter, tol );
+    problem_coupled coupled_problem(problem_dimension, NL, EL, domain_size, boundary_condition,  Eigen::MatrixXd(), initial_density, parameters,  element_order, field_dim, GP_vals, time_increment, T, dt, time_factor, max_iter, tol );
     return 0;
 }
