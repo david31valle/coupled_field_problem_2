@@ -6,45 +6,29 @@
 
 #include "../Eigen/Dense"
 #include <vector>
-#include <tuple>
-#include <array>
 
 class Mesh_2D {
 public:
-    using NodeMat = Eigen::MatrixXd;   // (#nodes) x 2 matrix of (x,y)
-    using ElemMat = Eigen::MatrixXi;   // (#elements) x ((deg+1)^2) connectivity
+    using MatrixD = Eigen::MatrixXd; // NL: N x 2
+    using MatrixI = Eigen::MatrixXi; // EL: Ne x NPE (1-based node IDs)
 
     struct Result {
-        NodeMat           NL;   // global node list
-        std::vector<ElemMat> EL; // one connectivity matrix per requested order
+        MatrixD NL;                 // unified nodes (x,y)
+        std::vector<MatrixI> EL;    // one EL per requested element order
     };
 
-    // Build and merge all requested polynomial‐order meshes
+    // element_orders.size() in [1..3]
     Result generate(double domain_size,
                     int partition,
                     const std::vector<int>& element_orders) const;
 
 private:
-    // Build a single degree-`degree` mesh (0-based indexing)
-    void individual(double domain_size,
-                    int partition,
-                    int degree,
-                    NodeMat& NL,
-                    ElemMat& EL) const;
+    static void individual(double domain_size,
+                           int partition,
+                           int degree,
+                           MatrixD& NL,
+                           MatrixI& EL);
 };
 
-// MATLAB‐style free‐function overloads
-std::pair<Mesh_2D::NodeMat,Mesh_2D::ElemMat>
-mesh_2D(int PD, double domain_size, int partition, int order);
-
-std::tuple<Mesh_2D::NodeMat,Mesh_2D::ElemMat,Mesh_2D::ElemMat>
-mesh_2D(int PD, double domain_size, int partition,
-        const std::array<int,2>& orders);
-
-std::tuple<Mesh_2D::NodeMat,Mesh_2D::ElemMat,Mesh_2D::ElemMat,Mesh_2D::ElemMat>
-mesh_2D(int PD, double domain_size, int partition,
-        const std::array<int,3>& orders);
-
-// Printer (for debugging)
-void printMesh2D(const Mesh_2D::NodeMat& NL,
-                 const Mesh_2D::ElemMat& EL);
+void printMesh2D(const Eigen::MatrixXd& NL,
+                 const Eigen::MatrixXi& EL);

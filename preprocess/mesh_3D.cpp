@@ -1,332 +1,460 @@
-// mesh_3D.cpp
 #include "mesh_3D.hpp"
 #include <algorithm>
+#include <array>
 #include <iostream>
+#include <map>
+#include <stdexcept>
 
-// lexicographic compare for 3D
-static bool cmp3(const std::array<double,3>& a,
-                 const std::array<double,3>& b) {
-    if (a[0]<b[0]) return true;
-    if (a[0]>b[0]) return false;
-    if (a[1]<b[1]) return true;
-    if (a[1]>b[1]) return false;
-    return a[2]<b[2];
-}
-
-Mesh_3D::Result Mesh_3D::generate(double domain_size,
-                                  int partition,
-                                  const std::vector<int>& element_orders) const
-{
-    // 1) Build each individual mesh
-    std::vector<NodeMat> NL_list;
-    std::vector<ElemMat> EL_list;
-    NL_list.reserve(element_orders.size());
-    EL_list.reserve(element_orders.size());
-    for (int deg : element_orders) {
-        NodeMat NL_i;
-        ElemMat EL_i;
-        individual(domain_size, partition, deg, NL_i, EL_i);
-        NL_list.push_back(std::move(NL_i));
-        EL_list.push_back(std::move(EL_i));
-    }
-
-    // 2) Union of all node-rows
-    std::vector<std::array<double,3>> all_nodes;
-    for (auto& NL_i : NL_list)
-        for (int r = 0; r < NL_i.rows(); ++r)
-            all_nodes.push_back({NL_i(r,0), NL_i(r,1), NL_i(r,2)});
-    std::sort(all_nodes.begin(), all_nodes.end(), cmp3);
-    all_nodes.erase(std::unique(all_nodes.begin(), all_nodes.end()), all_nodes.end());
-
-    // 3) Pack global NL
-    Result R;
-    R.NL.resize(all_nodes.size(), 3);
-    for (size_t i = 0; i < all_nodes.size(); ++i)
-        R.NL.row(i) = Eigen::Vector3d(
-            all_nodes[i][0],
-            all_nodes[i][1],
-            all_nodes[i][2]
-        );
-
-    // 4) Remap each EL into global indices
-    for (size_t m = 0; m < EL_list.size(); ++m) {
-        const auto& NL_i = NL_list[m];
-        const auto& Eold = EL_list[m];
-        ElemMat Enew = Eold;
-        for (int e = 0; e < Eold.rows(); ++e) {
-            for (int k = 0; k < Eold.cols(); ++k) {
-                int old_idx = Eold(e,k);  // 0-based
-                auto xyz = std::array<double,3>{
-                    NL_i(old_idx,0),
-                    NL_i(old_idx,1),
-                    NL_i(old_idx,2)
-                };
-                auto it = std::lower_bound(all_nodes.begin(),
-                                           all_nodes.end(),
-                                           xyz, cmp3);
-                Enew(e,k) = int(std::distance(all_nodes.begin(), it));
-            }
-        }
-        R.EL.push_back(std::move(Enew));
-    }
-
-    // 5) Convert to 1-based indexing
-    for (auto& E : R.EL)
-        E.array() += 1;
-
-    return R;
-}
-
-void Mesh_3D::individual(double domain_size,
-                         int partition,
+// -------------------- individual (MATLAB "individaul") --------------------
+void Mesh_3D::individual(double L,
+                         int p,
                          int degree,
-                         NodeMat& NL,
-                         ElemMat& EL) const
+                         MatrixD& NL,
+                         MatrixI& EL)
 {
-    int p   = partition;
-    int dp  = degree * p;
-    int nps = dp + 1;                   // nodes per side
-    int Nn  = nps * nps * nps;
-    int Ne  = p * p * p;
-    int Npe = (degree+1)*(degree+1)*(degree+1);
+    if (p <= 0 || degree <= 0)
+        throw std::invalid_argument("partition and degree must be positive.");
+    if (degree > 4)
+        throw std::invalid_argument("Only degrees 1..4 are implemented.");
 
-    // 1) Nodes: exactly MATLAB's ndgrid + (:)
-    NL.resize(Nn, 3);
-    double dd = domain_size / double(dp);
+    const int NX  = degree * p + 1;                 // nodes per axis
+    const int NoN = NX * NX * NX;
+    const int NoE = p * p * p;
+    const int NPE = (degree + 1) * (degree + 1) * (degree + 1);
+
+    NL.resize(NoN, 3);
+    EL.resize(NoE, NPE);
+
+    const double dx = L / static_cast<double>(degree * p);
+    const double dy = L / static_cast<double>(degree * p);
+    const double dz = L / static_cast<double>(degree * p);
+
+    // NL = [xx(:) yy(:) zz(:)] from ndgrid(X,Y,Z) with linear indexing
+    // i (X) fastest, then j (Y), k (Z)
     int idx = 0;
-    for (int k = 0; k < nps; ++k)
-        for (int j = 0; j < nps; ++j)
-            for (int i = 0; i < nps; ++i)
-                NL.row(idx++) = Eigen::Vector3d(i*dd, j*dd, k*dd);
+    for (int k = 0; k < NX; ++k) {
+        const double z = k * dz;
+        for (int j = 0; j < NX; ++j) {
+            const double y = j * dy;
+            for (int i = 0; i < NX; ++i) {
+                NL(idx, 0) = i * dx;
+                NL(idx, 1) = y;
+                NL(idx, 2) = z;
+                ++idx;
+            }
+        }
+    }
 
-    // 2) Elements: fully replicate MATLAB switch-case
-    EL.setZero(Ne, Npe);
-    int plane = (p+1)*(p+1);
-    int sq2   = (2*p+1)*(2*p+1);
-    int sq3   = (3*p+1)*(3*p+1);
-    int sq4   = (4*p+1)*(4*p+1);
+    // Helper: 1-based column setter
+    auto set1 = [&](int r, int col1, int val) {
+        EL(r, col1 - 1) = val;
+    };
 
-    for (int i = 1; i <= p; ++i) {
-        for (int j = 1; j <= p; ++j) {
-            for (int k = 1; k <= p; ++k) {
-                int eid = (i-1)*p*p + (j-1)*p + (k-1);
+    // Precomputed strides
+    const int vs = NX;            // "vertical" stride across Y
+    const int plane = NX * NX;    // Z-plane stride
 
-                if (i==1 && k==1) {
-                    switch (degree) {
+    // Elements
+    for (int ii = 1; ii <= p; ++ii) {               // layer in Z (MATLAB i)
+        for (int jj = 1; jj <= p; ++jj) {           // row in Y (MATLAB j)
+            for (int kk = 1; kk <= p; ++kk) {       // col in X (MATLAB k)
+                const int e1 = (ii - 1) * p * p + (jj - 1) * p + kk; // 1-based
+                const int r  = e1 - 1; // row in EL
+
+                if (ii == 1) {
+                    if (kk == 1) {
+                        switch (degree)
+                        {
                         case 1: {
-                            int n4 = (j-1)*(p+1)+(k-1);
-                            int n3 = n4+1;
-                            int n8 = n4+(p+1);
-                            int n7 = n8+1;
-                            int n1 = n4 + plane;
-                            int n2 = n3 + plane;
-                            int n5 = n8 + plane;
-                            int n6 = n7 + plane;
-                            // [1 2 3 4 5 6 7 8]
-                            EL(eid,0)=n1;
-                            EL(eid,1)=n2;
-                            EL(eid,2)=n3;
-                            EL(eid,3)=n4;
-                            EL(eid,4)=n5;
-                            EL(eid,5)=n6;
-                            EL(eid,6)=n7;
-                            EL(eid,7)=n8;
-                        } break;
+                            // MATLAB:
+                            // EL(...,4)=(j-1)*(p+1)+k; EL(...,3)=...+1;
+                            // EL(...,8)=...+(p+1);     EL(...,7)=...+1;
+                            // EL(...,1)=...+(p+1)^2;   EL(...,2)=...+(p+1)^2; ...
+                            const int base = (jj - 1) * (p + 1) + kk;
+                            set1(r, 4, base);
+                            set1(r, 3, base + 1);
+                            set1(r, 8, base + (p + 1));
+                            set1(r, 7, base + (p + 1) + 1);
 
-                    case 2: {
-                            int p1    = 2*p + 1;         // = (degree*p+1)
-                            int plane = p1 * p1;         // (2*p+1)^2
-                            // j,k are zero-based here (MATLAB’s j-1,k-1)
-                            int b = 2*j*p1 + k;          // = 2*(j)*(2*p+1) + k
-                            // Face at i==1, k==1 in MATLAB, here i==0,k==0
-                            // MATLAB EL(:,4)  → C++ EL(eid,3)
-                            EL(eid,3)  = b;
-                            // MATLAB EL(:,11) → C++ EL(eid,10)
-                            EL(eid,10) = b + 1;
-                            // MATLAB EL(:,3)  → C++ EL(eid,2)
-                            EL(eid,2)  = b + 2;
+                            set1(r, 1, base + (p + 1) * (p + 1));
+                            set1(r, 2, (base + 1) + (p + 1) * (p + 1));
+                            set1(r, 5, (base + (p + 1)) + (p + 1) * (p + 1));
+                            set1(r, 6, (base + (p + 1) + 1) + (p + 1) * (p + 1));
+                            break;
+                        }
+                        case 2: {
+                            // vs = 2*p+1
+                            const int v2  = 2 * p + 1;
+                            const int pl2 = v2 * v2;
+                            const int base = 2 * (jj - 1) * v2 + kk;
 
-                            // Next row in j-direction
-                            EL(eid,15) = b + p1;            // MATLAB col16
-                            EL(eid,23) = EL(eid,15) + 1;    // col24
-                            EL(eid,14) = EL(eid,15) + 2;    // col15
+                            set1(r,  4, base);
+                            set1(r, 11, base + 1);
+                            set1(r,  3, base + 2);
 
-                            // Next row in j-direction again
-                            EL(eid,7)  = b + 2*p1;          // col8
-                            EL(eid,18) = EL(eid,7) + 1;     // col19
-                            EL(eid,6)  = EL(eid,7) + 2;     // col7
+                            set1(r, 16, base + v2);
+                            set1(r, 24, base + v2 + 1);
+                            set1(r, 15, base + v2 + 2);
 
-                            // Now the “top” layer (add (2*p+1)^2)
-                            EL(eid,11) = b + plane;                 // col12
-                            EL(eid,20) = EL(eid,10) + plane;        // col21
-                            EL(eid,9)  = EL(eid,2) + plane;         // col10
+                            set1(r,  8, base + 2 * v2);
+                            set1(r, 19, base + 2 * v2 + 1);
+                            set1(r,  7, base + 2 * v2 + 2);
 
-                            EL(eid,24) = EL(eid,15) + plane;        // col25
-                            EL(eid,26) = EL(eid,23) + plane;        // col27
-                            EL(eid,22) = EL(eid,14) + plane;        // col23
-                            EL(eid,19) = EL(eid,7) + plane;         // col20
-                            EL(eid,25) = EL(eid,18) + plane;        // col26
-                            EL(eid,17) = EL(eid,6) + plane;         // col18
+                            set1(r, 12, base + pl2);
+                            set1(r, 21, base + 1 + pl2);
+                            set1(r, 10, base + 2 + pl2);
+                            set1(r, 25, base + v2 + pl2);
+                            set1(r, 27, base + v2 + 1 + pl2);
+                            set1(r, 23, base + v2 + 2 + pl2);
+                            set1(r, 20, base + 2 * v2 + pl2);
+                            set1(r, 26, base + 2 * v2 + 1 + pl2);
+                            set1(r, 18, base + 2 * v2 + 2 + pl2);
 
-                            // Finally, the very top layer (add 2*(2*p+1)^2)
-                            EL(eid,0)  = EL(eid,11) + plane;        // col1
-                            EL(eid,8)  = EL(eid,20) + plane;        // col9
-                            EL(eid,1)  = EL(eid,9)  + plane;        // col2
-                            EL(eid,12) = EL(eid,24) + plane;        // col13
-                            EL(eid,21) = EL(eid,26) + plane;        // col22
-                            EL(eid,13) = EL(eid,22) + plane;        // col14
-                            EL(eid,4)  = EL(eid,19) + plane;        // col5
-                            EL(eid,16) = EL(eid,25) + plane;        // col17
-                            EL(eid,5)  = EL(eid,17) + plane;        // col6
-                        } break;
-
+                            set1(r,  1, base + 2 * pl2);
+                            set1(r,  9, base + 1 + 2 * pl2);
+                            set1(r,  2, base + 2 + 2 * pl2);
+                            set1(r, 13, base + v2 + 2 * pl2);
+                            set1(r, 22, base + v2 + 1 + 2 * pl2);
+                            set1(r, 14, base + v2 + 2 + 2 * pl2);
+                            set1(r,  5, base + 2 * v2 + 2 * pl2);
+                            set1(r, 17, base + 2 * v2 + 1 + 2 * pl2);
+                            set1(r,  6, base + 2 * v2 + 2 + 2 * pl2);
+                            break;
+                        }
                         case 3: {
-                            int p3    = 3*p + 1;
-                            int plane = p3 * p3;
-                            int b     = 3*j*p3 + k;
+                            const int v3  = 3 * p + 1;
+                            const int pl3 = v3 * v3;
+                            const int base = 3 * (jj - 1) * v3 + kk;
 
-                            EL(eid, 3)  = b;
-                            EL(eid,13)  = b + 1;
-                            EL(eid,12)  = b + 2;
-                            EL(eid, 2)  = b + 3;
+                            set1(r,  4, base);
+                            set1(r, 14, base + 1);
+                            set1(r, 13, base + 2);
+                            set1(r,  3, base + 3);
 
-                            int n23 = b + p3;
-                            EL(eid,22)  = n23;
-                            EL(eid,45)  = n23 + 1;
-                            EL(eid,44)  = n23 + 2;
-                            EL(eid,20)  = n23 + 3;
+                            set1(r, 23, base + v3);
+                            set1(r, 46, base + v3 + 1);
+                            set1(r, 45, base + v3 + 2);
+                            set1(r, 21, base + v3 + 3);
 
-                            int n24 = n23 + p3;
-                            EL(eid,23)  = n24;
-                            EL(eid,46)  = n24 + 1;
-                            EL(eid,47)  = n24 + 2;
-                            EL(eid,21)  = n24 + 3;
+                            set1(r, 24, base + 2 * v3);
+                            set1(r, 47, base + 2 * v3 + 1);
+                            set1(r, 48, base + 2 * v3 + 2);
+                            set1(r, 22, base + 2 * v3 + 3);
 
-                            int n8 = n24 + p3;
-                            EL(eid, 7)  = n8;
-                            EL(eid,29)  = n8 + 1;
-                            EL(eid,28)  = n8 + 2;
-                            EL(eid, 6)  = n8 + 3;
+                            set1(r,  8, base + 3 * v3);
+                            set1(r, 30, base + 3 * v3 + 1);
+                            set1(r, 29, base + 3 * v3 + 2);
+                            set1(r,  7, base + 3 * v3 + 3);
 
-                            EL(eid,14)  = b + plane;
-                            EL(eid,35)  = b + 1 + plane;
-                            EL(eid,34)  = b + 2 + plane;
-                            EL(eid,11)  = b + 3 + plane;
+                            set1(r, 15, base + pl3);
+                            set1(r, 36, base + 1 + pl3);
+                            set1(r, 35, base + 2 + pl3);
+                            set1(r, 12, base + 3 + pl3);
+                            set1(r, 49, base + v3 + pl3);
+                            set1(r, 60, base + v3 + 1 + pl3);
+                            set1(r, 59, base + v3 + 2 + pl3);
+                            set1(r, 42, base + v3 + 3 + pl3);
+                            set1(r, 52, base + 2 * v3 + pl3);
+                            set1(r, 64, base + 2 * v3 + 1 + pl3);
+                            set1(r, 63, base + 2 * v3 + 2 + pl3);
+                            set1(r, 43, base + 2 * v3 + 3 + pl3);
+                            set1(r, 31, base + 3 * v3 + pl3);
+                            set1(r, 56, base + 3 * v3 + 1 + pl3);
+                            set1(r, 55, base + 3 * v3 + 2 + pl3);
+                            set1(r, 28, base + 3 * v3 + 3 + pl3);
 
-                            EL(eid,48)  = n23 + plane;
-                            EL(eid,59)  = n23 + 1 + plane;
-                            EL(eid,58)  = n23 + 2 + plane;
-                            EL(eid,41)  = n23 + 3 + plane;
+                            set1(r, 16, base + 2 * pl3);
+                            set1(r, 33, base + 1 + 2 * pl3);
+                            set1(r, 34, base + 2 + 2 * pl3);
+                            set1(r, 11, base + 3 + 2 * pl3);
+                            set1(r, 50, base + v3 + 2 * pl3);
+                            set1(r, 57, base + v3 + 1 + 2 * pl3);
+                            set1(r, 58, base + v3 + 2 + 2 * pl3);
+                            set1(r, 41, base + v3 + 3 + 2 * pl3);
+                            set1(r, 51, base + 2 * v3 + 2 * pl3);
+                            set1(r, 61, base + 2 * v3 + 1 + 2 * pl3);
+                            set1(r, 62, base + 2 * v3 + 2 + 2 * pl3);
+                            set1(r, 44, base + 2 * v3 + 3 + 2 * pl3);
+                            set1(r, 32, base + 3 * v3 + 2 * pl3);
+                            set1(r, 53, base + 3 * v3 + 1 + 2 * pl3);
+                            set1(r, 54, base + 3 * v3 + 2 + 2 * pl3);
+                            set1(r, 27, base + 3 * v3 + 3 + 2 * pl3);
 
-                            EL(eid,51)  = n24 + plane;
-                            EL(eid,63)  = n24 + 1 + plane;
-                            EL(eid,62)  = n24 + 2 + plane;
-                            EL(eid,42)  = n24 + 3 + plane;
-
-                            EL(eid,30)  = n8 + plane;
-                            EL(eid,55)  = n8 + 1 + plane;
-                            EL(eid,54)  = n8 + 2 + plane;
-                            EL(eid,27)  = n8 + 3 + plane;
-
-                            EL(eid,15)  = EL(eid,14) + plane;
-                            EL(eid,32)  = EL(eid,35) + plane;
-                            EL(eid,33)  = EL(eid,34) + plane;
-                            EL(eid,10)  = EL(eid,11) + plane;
-
-                            EL(eid,49)  = EL(eid,48) + plane;
-                            EL(eid,56)  = EL(eid,59) + plane;
-                            EL(eid,57)  = EL(eid,58) + plane;
-                            EL(eid,40)  = EL(eid,41) + plane;
-
-                            EL(eid,50)  = EL(eid,51) + plane;
-                            EL(eid,61)  = EL(eid,63) + plane;
-                            EL(eid,60)  = EL(eid,62) + plane;
-                            EL(eid,43)  = EL(eid,42) + plane;
-
-                            EL(eid,31)  = EL(eid,30) + plane;
-                            EL(eid,53)  = EL(eid,55) + plane;
-                            EL(eid,52)  = EL(eid,54) + plane;
-                            EL(eid,26)  = EL(eid,27) + plane;
-
-                            EL(eid, 0)  = EL(eid,15) + plane;
-                            EL(eid, 8)  = EL(eid,32) + plane;
-                            EL(eid, 9)  = EL(eid,33) + plane;
-                            EL(eid, 1)  = EL(eid,10) + plane;
-
-                            EL(eid,16)  = EL(eid,49) + plane;
-                            EL(eid,36)  = EL(eid,56) + plane;
-                            EL(eid,37)  = EL(eid,57) + plane;
-                            EL(eid,18)  = EL(eid,40) + plane;
-
-                            EL(eid,17)  = EL(eid,50) + plane;
-                            EL(eid,39)  = EL(eid,61) + plane;
-                            EL(eid,38)  = EL(eid,60) + plane;
-                            EL(eid,19)  = EL(eid,43) + plane;
-
-                            EL(eid, 4)  = EL(eid,27) + plane;
-                        } break;
-
+                            set1(r,  1, base + 3 * pl3);
+                            set1(r,  9, base + 1 + 3 * pl3);
+                            set1(r, 10, base + 2 + 3 * pl3);
+                            set1(r,  2, base + 3 + 3 * pl3);
+                            set1(r, 17, base + v3 + 3 * pl3);
+                            set1(r, 37, base + v3 + 1 + 3 * pl3);
+                            set1(r, 38, base + v3 + 2 + 3 * pl3);
+                            set1(r, 19, base + v3 + 3 + 3 * pl3);
+                            set1(r, 18, base + 2 * v3 + 3 * pl3);
+                            set1(r, 40, base + 2 * v3 + 1 + 3 * pl3);
+                            set1(r, 39, base + 2 * v3 + 2 + 3 * pl3);
+                            set1(r, 20, base + 2 * v3 + 3 + 3 * pl3);
+                            set1(r,  5, base + 3 * v3 + 3 * pl3);
+                            set1(r, 25, base + 3 * v3 + 1 + 3 * pl3);
+                            set1(r, 26, base + 3 * v3 + 2 + 3 * pl3);
+                            set1(r,  6, base + 3 * v3 + 3 + 3 * pl3);
+                            break;
+                        }
                         case 4: {
-                            // build 5×5×5 element by explicit nested loops to mirror MATLAB’s ordering
-                            int dp  = 4*p + 1;       // nodes per side for degree 4
-                            int nps = dp;
-                            // local index runs 0..124 in the same pattern as MATLAB’s xx(:),yy(:),zz(:)
-                            int cnt = 0;
-                            for (int kz = 0; kz <= 4; ++kz) {
-                                for (int jy = 0; jy <= 4; ++jy) {
-                                    for (int ix = 0; ix <= 4; ++ix) {
-                                        // global node index (0-based)
-                                        int x = (i-1)*4 + ix;
-                                        int y = (j-1)*4 + jy;
-                                        int z = (k-1)*4 + kz;
-                                        int gidx = (z * nps + y) * nps + x;
-                                        EL(eid, cnt++) = gidx;
-                                    }
-                                }
-                            }
-                        } break;
+                            const int v4  = 4 * p + 1;
+                            const int pl4 = v4 * v4;
+                            const int base = 4 * (jj - 1) * v4 + kk;
+
+                            set1(r,  4, base);
+                            set1(r, 17, base + 1);
+                            set1(r, 16, base + 2);
+                            set1(r, 15, base + 3);
+                            set1(r,  3, base + 4);
+
+                            set1(r, 30, base + v4);
+                            set1(r, 74, base + v4 + 1);
+                            set1(r, 73, base + v4 + 2);
+                            set1(r, 72, base + v4 + 3);
+                            set1(r, 27, base + v4 + 4);
+
+                            set1(r, 31, base + 2 * v4);
+                            set1(r, 75, base + 2 * v4 + 1);
+                            set1(r, 80, base + 2 * v4 + 2);
+                            set1(r, 79, base + 2 * v4 + 3);
+                            set1(r, 28, base + 2 * v4 + 4);
+
+                            set1(r, 32, base + 3 * v4);
+                            set1(r, 76, base + 3 * v4 + 1);
+                            set1(r, 77, base + 3 * v4 + 2);
+                            set1(r, 78, base + 3 * v4 + 3);
+                            set1(r, 29, base + 3 * v4 + 4);
+
+                            set1(r,  8, base + 4 * v4);
+                            set1(r, 41, base + 4 * v4 + 1);
+                            set1(r, 40, base + 4 * v4 + 2);
+                            set1(r, 39, base + 4 * v4 + 3);
+                            set1(r,  7, base + 4 * v4 + 4);
+
+                            // pl4
+                            set1(r, 18, base + pl4);
+                            set1(r, 51, base + 1 + pl4);
+                            set1(r, 50, base + 2 + pl4);
+                            set1(r, 49, base + 3 + pl4);
+                            set1(r, 14, base + 4 + pl4);
+                            set1(r, 81, base + v4 + pl4);
+                            set1(r,105, base + v4 + 1 + pl4);
+                            set1(r,104, base + v4 + 2 + pl4);
+                            set1(r,103, base + v4 + 3 + pl4);
+                            set1(r, 65, base + v4 + 4 + pl4);
+                            set1(r, 88, base + 2 * v4 + pl4);
+                            set1(r,113, base + 2 * v4 + 1 + pl4);
+                            set1(r,112, base + 2 * v4 + 2 + pl4);
+                            set1(r,111, base + 2 * v4 + 3 + pl4);
+                            set1(r, 66, base + 2 * v4 + 4 + pl4);
+                            set1(r, 87, base + 3 * v4 + pl4);
+                            set1(r,121, base + 3 * v4 + 1 + pl4);
+                            set1(r,120, base + 3 * v4 + 2 + pl4);
+                            set1(r,119, base + 3 * v4 + 3 + pl4);
+                            set1(r, 69, base + 3 * v4 + 4 + pl4);
+                            set1(r, 42, base + 4 * v4 + pl4);
+                            set1(r, 96, base + 4 * v4 + 1 + pl4);
+                            set1(r, 95, base + 4 * v4 + 2 + pl4);
+                            set1(r, 94, base + 4 * v4 + 3 + pl4);
+                            set1(r, 38, base + 4 * v4 + 4 + pl4);
+
+                            // 2*pl4
+                            set1(r, 19, base + 2 * pl4);
+                            set1(r, 52, base + 1 + 2 * pl4);
+                            set1(r, 53, base + 2 + 2 * pl4);
+                            set1(r, 48, base + 3 + 2 * pl4);
+                            set1(r, 13, base + 4 + 2 * pl4);
+                            set1(r, 82, base + v4 + 2 * pl4);
+                            set1(r,106, base + v4 + 1 + 2 * pl4);
+                            set1(r,123, base + v4 + 2 + 2 * pl4);
+                            set1(r,102, base + v4 + 3 + 2 * pl4);
+                            set1(r, 64, base + v4 + 4 + 2 * pl4);
+                            set1(r, 89, base + 2 * v4 + 2 * pl4);
+                            set1(r,114, base + 2 * v4 + 1 + 2 * pl4);
+                            set1(r,125, base + 2 * v4 + 2 + 2 * pl4);
+                            set1(r,110, base + 2 * v4 + 3 + 2 * pl4);
+                            set1(r, 71, base + 2 * v4 + 4 + 2 * pl4);
+                            set1(r, 86, base + 3 * v4 + 2 * pl4);
+                            set1(r,122, base + 3 * v4 + 1 + 2 * pl4);
+                            set1(r,124, base + 3 * v4 + 2 + 2 * pl4);
+                            set1(r,118, base + 3 * v4 + 3 + 2 * pl4);
+                            set1(r, 68, base + 3 * v4 + 4 + 2 * pl4);
+                            set1(r, 43, base + 4 * v4 + 2 * pl4);
+                            set1(r, 97, base + 4 * v4 + 1 + 2 * pl4);
+                            set1(r, 98, base + 4 * v4 + 2 + 2 * pl4);
+                            set1(r, 93, base + 4 * v4 + 3 + 2 * pl4);
+                            set1(r, 37, base + 4 * v4 + 4 + 2 * pl4);
+
+                            // 3*pl4
+                            set1(r, 20, base + 3 * pl4);
+                            set1(r, 45, base + 1 + 3 * pl4);
+                            set1(r, 46, base + 2 + 3 * pl4);
+                            set1(r, 47, base + 3 + 3 * pl4);
+                            set1(r, 12, base + 4 + 3 * pl4);
+                            set1(r, 83, base + v4 + 3 * pl4);
+                            set1(r, 99, base + v4 + 1 + 3 * pl4);
+                            set1(r,100, base + v4 + 2 + 3 * pl4);
+                            set1(r,101, base + v4 + 3 + 3 * pl4);
+                            set1(r, 63, base + v4 + 4 + 3 * pl4);
+                            set1(r, 84, base + 2 * v4 + 3 * pl4);
+                            set1(r,107, base + 2 * v4 + 1 + 3 * pl4);
+                            set1(r,108, base + 2 * v4 + 2 + 3 * pl4);
+                            set1(r,109, base + 2 * v4 + 3 + 3 * pl4);
+                            set1(r, 70, base + 2 * v4 + 4 + 3 * pl4);
+                            set1(r, 85, base + 3 * v4 + 3 * pl4);
+                            set1(r,115, base + 3 * v4 + 1 + 3 * pl4);
+                            set1(r,116, base + 3 * v4 + 2 + 3 * pl4);
+                            set1(r,117, base + 3 * v4 + 3 + 3 * pl4);
+                            set1(r, 69, base + 3 * v4 + 4 + 3 * pl4);
+                            set1(r, 44, base + 4 * v4 + 3 * pl4);
+                            set1(r, 90, base + 4 * v4 + 1 + 3 * pl4);
+                            set1(r, 91, base + 4 * v4 + 2 + 3 * pl4);
+                            set1(r, 92, base + 4 * v4 + 3 + 3 * pl4);
+                            set1(r, 36, base + 4 * v4 + 4 + 3 * pl4);
+
+                            // 4*pl4 (top plane)
+                            set1(r,  1, base + 4 * pl4);
+                            set1(r,  9, base + 1 + 4 * pl4);
+                            set1(r, 10, base + 2 + 4 * pl4);
+                            set1(r, 11, base + 3 + 4 * pl4);
+                            set1(r,  2, base + 4 + 4 * pl4);
+                            set1(r, 21, base + v4 + 4 * pl4);
+                            set1(r, 54, base + v4 + 1 + 4 * pl4);
+                            set1(r, 55, base + v4 + 2 + 4 * pl4);
+                            set1(r, 56, base + v4 + 3 + 4 * pl4);
+                            set1(r, 24, base + v4 + 4 + 4 * pl4);
+                            set1(r, 22, base + 2 * v4 + 4 * pl4);
+                            set1(r, 61, base + 2 * v4 + 1 + 4 * pl4);
+                            set1(r, 62, base + 2 * v4 + 2 + 4 * pl4);
+                            set1(r, 57, base + 2 * v4 + 3 + 4 * pl4);
+                            set1(r, 25, base + 2 * v4 + 4 + 4 * pl4);
+                            set1(r, 23, base + 3 * v4 + 4 * pl4);
+                            set1(r, 60, base + 3 * v4 + 1 + 4 * pl4);
+                            set1(r, 59, base + 3 * v4 + 2 + 4 * pl4);
+                            set1(r, 58, base + 3 * v4 + 3 + 4 * pl4);
+                            set1(r, 26, base + 3 * v4 + 4 + 4 * pl4);
+                            set1(r,  5, base + 4 * v4 + 4 * pl4);
+                            set1(r, 33, base + 4 * v4 + 1 + 4 * pl4);
+                            set1(r, 34, base + 4 * v4 + 2 + 4 * pl4);
+                            set1(r, 35, base + 4 * v4 + 3 + 4 * pl4);
+                            set1(r,  6, base + 4 * v4 + 4 + 4 * pl4);
+                            break;
+                        }
+                        default: break;
+                        }
+                    } else {
+                        // Same Z-layer & row, shift from previous element in X by 'degree'
+                        for (int c = 0; c < NPE; ++c)
+                            EL(r, c) = EL(r - 1, c) + degree;
                     }
-                }
-                else if (i==1) {
-                    // k>1: shift previous element by degree
-                    for (int c=0; c<Npe; ++c)
-                        EL(eid,c) = EL(eid-1,c) + degree;
-                }
-                else {
-                    // i>1: shift element p^2 behind by degree*plane
-                    for (int c=0; c<Npe; ++c)
-                        EL(eid,c) = EL(eid - p*p, c) + degree*plane;
+                } else {
+                    // Copy from element one layer below (p^2 elements back) + stride across Z
+                    const int prev = r - p * p; // previous layer's same (j,k)
+                    for (int c = 0; c < NPE; ++c)
+                        EL(r, c) = EL(prev, c) + degree * plane;
                 }
             }
         }
     }
 }
 
-// MATLAB-style overloads
-std::pair<Mesh_3D::NodeMat,Mesh_3D::ElemMat>
-mesh_3D(int, double ds, int p, int o) {
-    Mesh_3D m; auto R = m.generate(ds,p,{o}); return{R.NL,R.EL[0]};}
-std::tuple<Mesh_3D::NodeMat,Mesh_3D::ElemMat,Mesh_3D::ElemMat>
-mesh_3D(int, double ds, int p, const std::array<int,2>& o) {
-    Mesh_3D m; auto R = m.generate(ds,p,{o[0],o[1]}); return{R.NL,R.EL[0],R.EL[1]};}
-std::tuple<Mesh_3D::NodeMat,Mesh_3D::ElemMat,Mesh_3D::ElemMat,Mesh_3D::ElemMat>
-mesh_3D(int, double ds, int p, const std::array<int,3>& o) {
-    Mesh_3D m; auto R = m.generate(ds,p,{o[0],o[1],o[2]});
-    return{R.NL,R.EL[0],R.EL[1],R.EL[2]};}
-
-// Debug printer
-void printMesh3D(const Mesh_3D::NodeMat& NL,
-                 const Mesh_3D::ElemMat& EL)
+// -------------------- generate (MATLAB union + remap) --------------------
+Mesh_3D::Result Mesh_3D::generate(double L,
+                                  int p,
+                                  const std::vector<int>& orders) const
 {
-    std::cout<<"=== 3D Mesh ===\n";
-    std::cout<<"Nodes("<<NL.rows()<<"):\n";
-    for(int i=0;i<NL.rows();++i)
-        std::cout<<" ["<<NL(i,0)<<','<<NL(i,1)<<','<<NL(i,2)<<"]\n";
-    std::cout<<"\nElements("<<EL.rows()<<"):\n";
-    for(int e=0;e<EL.rows();++e){
-        std::cout<<"  [ ";
-        for(int c=0;c<EL.cols();++c)
-            std::cout<<EL(e,c)<<(c+1<EL.cols()? ", ": " ]\n");
+    if (orders.empty() || orders.size() > 3)
+        throw std::invalid_argument("element_orders must have 1..3 entries.");
+
+    // Per-order meshes
+    std::vector<MatrixD> NLs;
+    std::vector<MatrixI> ELs;
+    NLs.reserve(orders.size());
+    ELs.reserve(orders.size());
+
+    for (int d : orders) {
+        MatrixD NL_i; MatrixI EL_i;
+        individual(L, p, d, NL_i, EL_i);
+        NLs.emplace_back(std::move(NL_i));
+        ELs.emplace_back(std::move(EL_i));
     }
-    std::cout<<"===============\n";
+
+    // Union rows (exact), lexicographic (x,y,z)
+    std::vector<std::array<double,3>> all;
+    size_t total = 0;
+    for (const auto& NL_i : NLs) total += static_cast<size_t>(NL_i.rows());
+    all.reserve(total);
+
+    for (const auto& NL_i : NLs)
+        for (int r = 0; r < NL_i.rows(); ++r)
+            all.push_back({NL_i(r,0), NL_i(r,1), NL_i(r,2)});
+
+    std::sort(all.begin(), all.end());
+    all.erase(std::unique(all.begin(), all.end()), all.end());
+
+    Result res;
+    res.NL.resize(static_cast<int>(all.size()), 3);
+    for (int i = 0; i < res.NL.rows(); ++i) {
+        res.NL(i,0) = all[static_cast<size_t>(i)][0];
+        res.NL(i,1) = all[static_cast<size_t>(i)][1];
+        res.NL(i,2) = all[static_cast<size_t>(i)][2];
+    }
+
+    // Map (x,y,z) -> 1-based node id
+    std::map<std::array<double,3>, int> idx_map;
+    for (int i = 0; i < res.NL.rows(); ++i)
+        idx_map[{res.NL(i,0), res.NL(i,1), res.NL(i,2)}] = i + 1;
+
+    // Remap ELs to unified NL (1-based preserved)
+    for (size_t k = 0; k < NLs.size(); ++k) {
+        const MatrixD& NL_i = NLs[k];
+        const MatrixI& Eold = ELs[k];
+        MatrixI Enew = Eold;
+
+        std::vector<int> map_old_to_new(static_cast<size_t>(NL_i.rows()));
+        for (int r = 0; r < NL_i.rows(); ++r) {
+            auto it = idx_map.find({NL_i(r,0), NL_i(r,1), NL_i(r,2)});
+            if (it == idx_map.end())
+                throw std::runtime_error("3D remap failed: node not found in unified NL.");
+            map_old_to_new[static_cast<size_t>(r)] = it->second; // 1-based
+        }
+
+        for (int e = 0; e < Eold.rows(); ++e)
+            for (int c = 0; c < Eold.cols(); ++c) {
+                const int old1 = Eold(e,c);   // 1-based local id
+                const int old0 = old1 - 1;
+                Enew(e,c) = map_old_to_new[static_cast<size_t>(old0)];
+            }
+
+        res.EL.push_back(std::move(Enew));
+    }
+
+    return res;
+}
+
+// -------------------- small console printer --------------------
+void printMesh3D(const Eigen::MatrixXd& NL,
+                 const Eigen::MatrixXi& EL)
+{
+    std::cout << "=== 3D Mesh ===\n";
+    std::cout << "Nodes (N=" << NL.rows() << "): [x y z]\n";
+    const int showN = std::min<int>(NL.rows(), 10);
+    for (int i = 0; i < showN; ++i)
+        std::cout << "  " << i+1 << ": " << NL(i,0) << "  " << NL(i,1) << "  " << NL(i,2) << "\n";
+    if (NL.rows() > showN) std::cout << "  ...\n";
+
+    std::cout << "\nElements (E=" << EL.rows()
+              << ", NPE=" << (EL.cols()) << "): node IDs (1-based)\n";
+    const int showE = std::min<int>(EL.rows(), 6);
+    for (int e = 0; e < showE; ++e) {
+        std::cout << "  e" << e+1 << ": [";
+        for (int j = 0; j < EL.cols(); ++j) {
+            std::cout << EL(e,j) << (j+1<EL.cols()? ", ":"");
+        }
+        std::cout << "]\n";
+    }
+    if (EL.rows() > showE) std::cout << "  ...\n";
+    std::cout << "================\n";
 }

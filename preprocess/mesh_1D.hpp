@@ -11,12 +11,12 @@
 
 class Mesh_1D {
 public:
-    using Vector  = Eigen::VectorXd;
+    using Vector = Eigen::VectorXd;
     using Matrix = Eigen::MatrixXi;
 
     struct Result {
-        Vector NL;
-        std::vector<Matrix> EL;
+        Vector NL;                 // unified node coordinates (column vector)
+        std::vector<Matrix> EL;    // each EL uses 1-based node IDs (MATLAB parity)
     };
 
     Mesh_1D() = default;
@@ -33,6 +33,7 @@ private:
                            Matrix& EL);
 };
 
+// Overloads to mirror MATLAB nargout behavior
 std::pair<Mesh_1D::Vector, Mesh_1D::Matrix>
 mesh_1D(int PD, double domain_size, int partition, int order, bool plot_mesh=false);
 
