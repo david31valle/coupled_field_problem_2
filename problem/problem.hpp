@@ -9,6 +9,10 @@
 #include <iostream>
 #include "../node/node.hpp"
 #include "../element/element.hpp"
+#include "../Eigen/SparseCholesky"
+#include "../Eigen/SparseLU"
+#include "../Eigen/IterativeLinearSolvers"
+
 
 class problem_coupled {
 public:
@@ -47,6 +51,8 @@ public:
     Eigen::VectorXd Rtot;
     Eigen::SparseMatrix<double> Ktot;
 
+    Eigen::VectorXd Rtot_GP;
+    Eigen::SparseMatrix<double> Ktot_GP;
     // === Constructor ===
     problem_coupled(int PD,
                     std::vector<Node>& NL,
@@ -83,6 +89,7 @@ private:
     Eigen::VectorXd Residual(double dt);
     std::pair<double, double> calculate_max_min_difference();
     double calculate_overall_density();
+    void solve();
 
 
 

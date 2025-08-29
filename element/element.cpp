@@ -195,111 +195,123 @@ void element::compute_at_gp(const Eigen::VectorXd& c,
                             Eigen::MatrixXd& Gradcn_gp,
                             Eigen::MatrixXd& Gradvn_gp)
 {
-    // Scalar values at Gauss points
-    c_gp  = c  * N1_gp;
-    cn_gp = cn * N1_gp;
+    // Scalar values at Gauss points  (OK: (NGP x 1))
+    c_gp  = N1_gp.transpose() * c;   // (NGP x 1)
+    cn_gp = N1_gp.transpose() * cn;  // (NGP x 1)
 
-    // Vector values at Gauss points
+// Vector values at Gauss points (already OK for shapes PD×NPE2 times NPE2×NGP = PD×NGP)
     v_gp  = v  * N2_gp;
     vn_gp = vn * N2_gp;
 
-    // Scalar gradients at Gauss points
-    Gradc_gp  = c  * GradN1_gp;
-    Gradcn_gp = cn * GradN1_gp;
+// Scalar gradients at Gauss points (you later index as 1×(PD*NGP), so make row)
+    Gradc_gp  = c.transpose()  * GradN1_gp;  // (1 x PD*NGP)
+    Gradcn_gp = cn.transpose() * GradN1_gp;  // (1 x PD*NGP)
 
-    // Vector gradients at Gauss points
+// Vector gradients at Gauss points (already consistent: PD×NPE2 times NPE2×(PD*NGP) = PD×(PD*NGP))
     Gradv_gp  = v  * GradN2_gp;
     Gradvn_gp = vn * GradN2_gp;
+
 }
 
 std::pair<Eigen::VectorXd, Eigen::VectorXd> element::Residual(double dt) {
-    // === Unpack physical parameters ===
-    double E  = parameters[0];
-    double R  = parameters[1];
-    double xi = parameters[2];
+    // unpack parameters
+    const double E  = parameters[0];
+    const double R  = parameters[1];
+    const double xi = parameters[2];
 
-    Eigen::MatrixXd II = Eigen::MatrixXd::Identity(PD, PD);
+    const Eigen::MatrixXd II = Eigen::MatrixXd::Identity(PD, PD);
 
-    // === Field values and gradients at Gauss points ===
+    // interpolate fields and gradients at GP
     Eigen::VectorXd c_gp, cn_gp;
     Eigen::MatrixXd v_gp, vn_gp;
     Eigen::MatrixXd Gradc_gp, Gradcn_gp;
     Eigen::MatrixXd Gradv_gp, Gradvn_gp;
 
-    this->compute_at_gp(
-            this->c, this->v, this->cn, this->vn,
-            this->N1, this->N2, this->GradN1, this->GradN2,
-            c_gp, v_gp, cn_gp, vn_gp,
-            Gradc_gp, Gradv_gp, Gradcn_gp, Gradvn_gp
-    );
+    compute_at_gp(c, v, cn, vn, N1, N2, GradN1, GradN2,
+                  c_gp, v_gp, cn_gp, vn_gp,
+                  Gradc_gp, Gradv_gp, Gradcn_gp, Gradvn_gp);
 
-    // === Initialize residuals ===
-    Eigen::VectorXd R1 = Eigen::VectorXd::Zero(NPE1);         // scalar field
-    Eigen::VectorXd R2 = Eigen::VectorXd::Zero(NPE2 * PD);    // vector field
+    // residual vectors
+    Eigen::VectorXd R1 = Eigen::VectorXd::Zero(NPE1);        // size NPE1×1
+    Eigen::VectorXd R2 = Eigen::VectorXd::Zero(NPE2 * PD);   // size (NPE2*PD)×1
 
-    int NGP = GP.cols();
-    Eigen::VectorXd wp = GP.row(GP.rows() - 1);
+    // number of GP and weights (last row of GP)
+    const int NGP = GP.cols();
+    const Eigen::VectorXd wp = GP.row(GP.rows() - 1).transpose();
 
     for (int gp = 0; gp < NGP; ++gp) {
-        Eigen::VectorXd N1 = N1.col(gp);
-        Eigen::VectorXd N2 = N2.col(gp);
+        // N1 = N1_gp(:,gp)   N2 = N2_gp(:,gp)
+        const Eigen::VectorXd N1_gp = N1.col(gp);              // NPE1×1
+        const Eigen::VectorXd N2_gp = N2.col(gp);              // NPE2×1
 
-        Eigen::MatrixXd GradN1 = GradN1.block(0, gp * PD, NPE1, PD);
-        Eigen::MatrixXd GradN2 = GradN2.block(0, gp * PD, NPE2, PD);
-        Eigen::MatrixXd J = JJ.block(0, gp * PD, PD, PD);
-        double JxW = J.determinant() * wp(gp);
+        // GradN1 = GradN1_gp(:, block)   GradN2 = GradN2_gp(:, block)
+        const int col0 = gp * PD;
+        const Eigen::MatrixXd GradN1_gp = GradN1.block(0, col0, NPE1, PD); // NPE1×PD
+        const Eigen::MatrixXd GradN2_gp = GradN2.block(0, col0, NPE2, PD); // NPE2×PD
 
-        // Extract scalar values
-        double c   = c_gp(gp);
-        double cn  = cn_gp(gp);
+        // JxW = det(JJ(:,block)) * wp(gp)
+        const Eigen::MatrixXd J = JJ.block(0, col0, PD, PD);
+        const double JxW = J.determinant() * wp(gp);
 
-        // Extract vector values
-        Eigen::VectorXd v  = v_gp.col(gp);
-        Eigen::VectorXd vn = vn_gp.col(gp);
+        // values at this GP
+        const double c_val = c_gp(gp);
+        const double cn_val = cn_gp(gp);
 
-        // Extract gradients (note: Gradc, Gradcn are column vectors)
-        Eigen::VectorXd Gradc   = Gradc_gp.block(0, gp * PD, 1, PD).transpose();
-        Eigen::VectorXd Gradcn  = Gradcn_gp.block(0, gp * PD, 1, PD).transpose();
-        Eigen::MatrixXd Gradv   = Gradv_gp.block(0, gp * PD, PD, PD);
-        Eigen::MatrixXd Gradvn  = Gradvn_gp.block(0, gp * PD, PD, PD);
+        const Eigen::VectorXd v_val  = v_gp.col(gp);           // PD×1
+        const Eigen::VectorXd vn_val = vn_gp.col(gp);          // PD×1
 
-        // Divergence of vector field
-        double Divv = Gradv.trace();
+//        std::cout<<"Gradcn_gp"<<std::endl;
+//        std::cout<<Gradc_gp<<std::endl;
+        const Eigen::VectorXd Gradc  = Gradc_gp.block(0, col0, 1, PD).transpose();  // PD×1
+        const Eigen::VectorXd Gradcn = Gradcn_gp.block(0, col0, 1, PD).transpose();// PD×1
+//        std::cout<<"Gradvn_gp"<<std::endl;
+//        std::cout<<Gradv_gp<<std::endl;
+        const Eigen::MatrixXd Gradv  = Gradv_gp.block(0, col0, PD, PD);             // PD×PD
+        const Eigen::MatrixXd Gradvn = Gradvn_gp.block(0, col0, PD, PD);            // PD×PD
 
-        // Stress term depending on dimension
+        // Divv = trace(Gradv)
+        const double Divv = Gradv.trace();
+
+        // sig depending on PD
         Eigen::MatrixXd sig(PD, PD);
         if (PD == 1) {
-            sig = -(E * 2 * R * c) / (1 - 2 * R * c) * II;
+            sig = -(E * 2.0 * R * c_val) / (1.0 - 2.0 * R * c_val) * II;
         } else if (PD == 2) {
-            sig = -(E * M_PI * R * R * c) / (1 - M_PI * R * R * c) * II;
+            sig = -(E * M_PI * R * R * c_val) / (1.0 - M_PI * R * R * c_val) * II;
         } else if (PD == 3) {
-            sig = -(E * (4.0 / 3.0) * M_PI * R * R * R * c) / (1 - (4.0 / 3.0) * M_PI * R * R * R * c) * II;
+            const double coeff = (4.0 / 3.0) * M_PI * R * R * R;
+            sig = -(E * coeff * c_val) / (1.0 - coeff * c_val) * II;
         } else {
-            throw std::runtime_error("Unsupported PD dimension.");
+            throw std::runtime_error("Residual: unsupported PD");
         }
 
-        // === Residuals ===
-        double R1_1 = (c - cn) / dt;
-        Eigen::VectorXd R1_2 = -c * v;
+        // local pieces
+        const double        R1_1 = (c_val - cn_val) / dt;
+        const Eigen::VectorXd R1_2 = -c_val * v_val;
 
-        Eigen::VectorXd R2_1 = xi * c * v;
-        Eigen::MatrixXd R2_2 = sig;
+        const Eigen::VectorXd R2_1 = xi * c_val * v_val;
+        const Eigen::MatrixXd R2_2 = sig;
 
-        // === Assembly into R1 (scalar field) ===
+        // assemble R1
         for (int I = 0; I < NPE1; ++I) {
-            double r = R1_1 * N1(I) + R1_2.dot(GradN1.row(I));
-            R1(I) += r * JxW;
+            // R11 = ( R1_1 * N1(I) + R1_2' * GradN1(I,:)' ) * JxW
+            const double scalar = R1_1 * N1_gp(I)
+                                  + R1_2.dot(GradN1_gp.row(I).transpose());
+            R1(I) += scalar * JxW;
         }
 
-        // === Assembly into R2 (vector field) ===
+        // assemble R2
         for (int I = 0; I < NPE2; ++I) {
-            Eigen::VectorXd r = R2_1 * N2(I) + R2_2 * GradN2.row(I).transpose();
+            // R22 = ( R2_1 * N2(I) + R2_2 * GradN2(I,:)' ) * JxW
+            Eigen::VectorXd r = R2_1 * N2_gp(I)
+                                + R2_2 * GradN2_gp.row(I).transpose();   // PD×1
             R2.segment(I * PD, PD) += r * JxW;
         }
     }
 
     return {R1, R2};
 }
+
 
 void element::assemble_tangent_matrices(double JxW,
                                         double c_val,
@@ -384,77 +396,237 @@ void element::assemble_tangent_matrices(double JxW,
 
 std::tuple<Eigen::VectorXd, Eigen::VectorXd, Eigen::MatrixXd, Eigen::MatrixXd, Eigen::MatrixXd, Eigen::MatrixXd>
 element::RK(double dt) {
-    double E = parameters[0];
-    double R = parameters[1];
+// Unpack parameters (E, R, xi)
+    double E  = parameters[0];
+    double R  = parameters[1];
     double xi = parameters[2];
 
+// Identity
     Eigen::MatrixXd II = Eigen::MatrixXd::Identity(PD, PD);
 
+// Values and grads at GP
     Eigen::VectorXd c_gp, cn_gp;
     Eigen::MatrixXd v_gp, vn_gp;
     Eigen::MatrixXd Gradc_gp, Gradcn_gp;
     Eigen::MatrixXd Gradv_gp, Gradvn_gp;
 
+// Interpolate to GP (c, v, cn, vn; N1, N2; GradN1, GradN2)
     compute_at_gp(c, v, cn, vn, N1, N2, GradN1, GradN2,
                   c_gp, v_gp, cn_gp, vn_gp,
                   Gradc_gp, Gradv_gp, Gradcn_gp, Gradvn_gp);
 
-    Eigen::VectorXd R1 = Eigen::VectorXd::Zero(NPE1);
-    Eigen::VectorXd R2 = Eigen::VectorXd::Zero(NPE2 * PD);
+// Allocate residuals and blocks
+    Eigen::VectorXd R1 = Eigen::VectorXd::Zero(NPE1);       // c
+    Eigen::VectorXd R2 = Eigen::VectorXd::Zero(NPE2 * PD);  // v
     Eigen::MatrixXd K11 = Eigen::MatrixXd::Zero(NPE1, NPE1);
     Eigen::MatrixXd K12 = Eigen::MatrixXd::Zero(NPE1, NPE2 * PD);
     Eigen::MatrixXd K21 = Eigen::MatrixXd::Zero(NPE2 * PD, NPE1);
     Eigen::MatrixXd K22 = Eigen::MatrixXd::Zero(NPE2 * PD, NPE2 * PD);
 
+// Number of GP and weights
     int NGP = GP.cols();
     Eigen::VectorXd wp = GP.row(GP.rows() - 1);
 
+
     for (int gp = 0; gp < NGP; ++gp) {
-        Eigen::VectorXd N1_gp = N1.col(gp);
-        Eigen::VectorXd N2_gp = N2.col(gp);
-        Eigen::MatrixXd GradN1_gp = GradN1.block(0, gp * PD, NPE1, PD);
-        Eigen::MatrixXd GradN2_gp = GradN2.block(0, gp * PD, NPE2, PD);
-        Eigen::MatrixXd J = JJ.block(0, gp * PD, PD, PD);
-        double JxW = J.determinant() * wp(gp);
+        // column/block offset for this Gauss point
+        const int col0 = gp * PD;
 
-        double c_val = c_gp(gp);
-        double cn_val = cn_gp(gp);
-        Eigen::VectorXd v_val = v_gp.col(gp);
+// N1 = N1_gp(:,gp);  N2 = N2_gp(:,gp);
+        Eigen::VectorXd N1 = this->N1.col(gp);            // size: NPE1 × 1
+        Eigen::VectorXd N2 = this->N2.col(gp);            // size: NPE2 × 1
 
-        Eigen::VectorXd Gradc = Gradc_gp.block(0, gp * PD, 1, PD).transpose();
-        Eigen::MatrixXd Gradv = Gradv_gp.block(0, gp * PD, PD, PD);
+// GradN1 = GradN1_gp(:,(gp-1)*PD+1:(gp-1)*PD+PD);
+// GradN2 = GradN2_gp(:,(gp-1)*PD+1:(gp-1)*PD+PD);
+        Eigen::MatrixXd GradN1 = this->GradN1.block(0, col0, NPE1, PD); // NPE1 × PD
+        Eigen::MatrixXd GradN2 = this->GradN2.block(0, col0, NPE2, PD); // NPE2 × PD
 
-        Eigen::MatrixXd sig = Eigen::MatrixXd::Zero(PD, PD);
-        Eigen::MatrixXd dsig_dc = Eigen::MatrixXd::Zero(PD, PD);
+// JxW = det(JJ(:,(gp-1)*PD+1:(gp-1)*PD+PD)) * wp(gp);
+        Eigen::MatrixXd JJgp = this->JJ.block(0, col0, PD, PD); // PD × PD
+        double JxW = JJgp.determinant() * wp(gp);
+
+// c  = c_gp(:,gp);  v  = v_gp(:,gp);
+        double c  = c_gp(gp);
+        Eigen::VectorXd v  = v_gp.col(gp);               // PD × 1
+
+// cn = cn_gp(:,gp); vn = vn_gp(:,gp);
+        double cn = cn_gp(gp);
+        Eigen::VectorXd vn = vn_gp.col(gp);              // PD × 1
+
+// Gradc  = Gradc_gp(:,block)';   Gradv  = Gradv_gp(:,block);
+        Eigen::VectorXd Gradc  = Gradc_gp.block(0, col0, 1, PD).transpose(); // PD × 1
+        Eigen::MatrixXd Gradv  = Gradv_gp.block(0, col0, PD, PD);            // PD × PD
+
+// Gradcn = Gradcn_gp(:,block)';  Gradvn = Gradvn_gp(:,block);
+        Eigen::VectorXd Gradcn = Gradcn_gp.block(0, col0, 1, PD).transpose(); // PD × 1
+        Eigen::MatrixXd Gradvn = Gradvn_gp.block(0, col0, PD, PD);            // PD × PD
+
+// Divv = trace(Gradv);
+        double Divv = Gradv.trace();
+
+        // Constitutive stress tensor and its derivatives depending on problem dimension
+        Eigen::MatrixXd sig, dsig_dc;
+        Eigen::MatrixXd dsig_dv;                // 3rd-order in MATLAB, collapsed here
+        std::vector<Eigen::MatrixXd> dsig_dGradc; // 3rd-order zeros(PD,PD,PD)
+        std::vector<std::vector<Eigen::MatrixXd>> dsig_dGradv; // 4th-order zeros(PD,PD,PD,PD)
 
         if (PD == 1) {
-            sig = -(E * 2 * R * c_val) / (1 - 2 * R * c_val) * II;
-            dsig_dc = -(2 * E * R) / std::pow(1 - 2 * R * c_val, 2) * II;
-        } else if (PD == 2) {
-            sig = -(E * M_PI * R * R * c_val) / (1 - M_PI * R * R * c_val) * II;
-            dsig_dc = -(E * M_PI * R * R) / std::pow(1 - M_PI * R * R * c_val, 2) * II;
-        } else if (PD == 3) {
-            sig = -(E * (4.0 / 3.0) * M_PI * R * R * R * c_val) / (1 - (4.0 / 3.0) * M_PI * R * R * R * c_val) * II;
-            dsig_dc = -(E * (4.0 / 3.0) * M_PI * R * R * R) / std::pow(1 - (4.0 / 3.0) * M_PI * R * R * R * c_val, 2) * II;
+            sig     = -(E * 2.0 * R * c) / (1.0 - 2.0 * R * c) * II;
+            dsig_dc = -(2.0 * E * R) / std::pow(1.0 - 2.0 * R * c, 2) * II;
+
+            dsig_dv     = Eigen::MatrixXd::Zero(PD, PD * PD);
+            dsig_dGradc = std::vector<Eigen::MatrixXd>(PD, Eigen::MatrixXd::Zero(PD, PD));
+            dsig_dGradv = std::vector<std::vector<Eigen::MatrixXd>>(PD,
+                                                                    std::vector<Eigen::MatrixXd>(PD, Eigen::MatrixXd::Zero(PD, PD)));
         }
+        else if (PD == 2) {
+            sig     = -(E * M_PI * R * R * c) / (1.0 - M_PI * R * R * c) * II;
+            dsig_dc = -(E * M_PI * R * R) / std::pow(1.0 - M_PI * R * R * c, 2) * II;
 
-        double R1_1 = (c_val - cn_val) / dt;
-        Eigen::VectorXd R1_2 = -c_val * v_val;
-        Eigen::VectorXd R2_1 = xi * c_val * v_val;
-        Eigen::MatrixXd R2_2 = sig;
+            dsig_dv     = Eigen::MatrixXd::Zero(PD, PD * PD);
+            dsig_dGradc = std::vector<Eigen::MatrixXd>(PD, Eigen::MatrixXd::Zero(PD, PD));
+            dsig_dGradv = std::vector<std::vector<Eigen::MatrixXd>>(PD,
+                                                                    std::vector<Eigen::MatrixXd>(PD, Eigen::MatrixXd::Zero(PD, PD)));
+        }
+        else if (PD == 3) {
+            double coeff = (4.0 / 3.0) * M_PI * R * R * R;
+            sig     = -(E * coeff * c) / (1.0 - coeff * c) * II;
+            dsig_dc = -(E * coeff) / std::pow(1.0 - coeff * c, 2) * II;
 
+            dsig_dv     = Eigen::MatrixXd::Zero(PD, PD * PD);
+            dsig_dGradc = std::vector<Eigen::MatrixXd>(PD, Eigen::MatrixXd::Zero(PD, PD));
+            dsig_dGradv = std::vector<std::vector<Eigen::MatrixXd>>(PD,
+                                                                    std::vector<Eigen::MatrixXd>(PD, Eigen::MatrixXd::Zero(PD, PD)));
+        }
+        // Local residual pieces and their derivatives (sizes follow PD)
+        double R1_1 = (c - cn) / dt;
+        double dR1_1_dc = 1.0 / dt;
+        Eigen::VectorXd dR1_1_dv      = Eigen::VectorXd::Zero(PD);     // PD×1
+        Eigen::VectorXd dR1_1_dGradc  = Eigen::VectorXd::Zero(PD);     // PD×1
+        Eigen::MatrixXd dR1_1_dGradv  = Eigen::MatrixXd::Zero(PD, PD); // PD×PD
+
+        Eigen::VectorXd R1_2   = -c * v;                               // PD×1
+        Eigen::VectorXd dR1_2_dc  = -v;                                 // PD×1
+        Eigen::MatrixXd dR1_2_dv  = -c * II;                            // PD×PD
+        Eigen::MatrixXd dR1_2_dGradc = Eigen::MatrixXd::Zero(PD, PD);   // PD×PD
+        std::vector<Eigen::MatrixXd> dR1_2_dGradv(                      // PD×PD×PD
+                PD, Eigen::MatrixXd::Zero(PD, PD));
+
+        Eigen::VectorXd R2_1   = xi * c * v;                            // PD×1
+        Eigen::VectorXd dR2_1_dc = xi * v;                              // PD×1
+        Eigen::MatrixXd dR2_1_dv = xi * c * II;                         // PD×PD
+        Eigen::MatrixXd dR2_1_dGradc = Eigen::MatrixXd::Zero(PD, PD);   // PD×PD
+        std::vector<Eigen::MatrixXd> dR2_1_dGradv(                      // PD×PD×PD
+                PD, Eigen::MatrixXd::Zero(PD, PD));
+
+        Eigen::MatrixXd R2_2   = sig;                                   // PD×PD
+        Eigen::MatrixXd dR2_2_dc = dsig_dc;                             // PD×PD
+        std::vector<Eigen::MatrixXd> dR2_2_dv(                          // PD×PD×PD
+                PD, Eigen::MatrixXd::Zero(PD, PD));
+        std::vector<Eigen::MatrixXd> dR2_2_dGradc(                      // PD×PD×PD
+                PD, Eigen::MatrixXd::Zero(PD, PD));
+        std::vector<std::vector<Eigen::MatrixXd>> dR2_2_dGradv(         // PD×PD×PD×PD
+                PD, std::vector<Eigen::MatrixXd>(PD, Eigen::MatrixXd::Zero(PD, PD)));
+
+        // Assemble scalar-field residual R1 from local contributions
         for (int I = 0; I < NPE1; ++I) {
-            double r = R1_1 * N1_gp(I) + R1_2.dot(GradN1_gp.row(I));
-            R1(I) += r * JxW;
+            double R11 = (R1_1 * N1(I) + R1_2.dot(GradN1.row(I).transpose())) * JxW;
+            R1(I) += R11; // same as MATLAB’s (I-1)*1+1 slice
         }
 
+        // Assemble vector-field residual R2 from local contributions
         for (int I = 0; I < NPE2; ++I) {
-            Eigen::VectorXd r = R2_1 * N2_gp(I) + R2_2 * GradN2_gp.row(I).transpose();
-            R2.segment(I * PD, PD) += r * JxW;
+            Eigen::VectorXd R22 = (R2_1 * N2(I) + R2_2 * GradN2.row(I).transpose()) * JxW;
+            R2.segment(I * PD, PD) += R22;
         }
 
-        assemble_tangent_matrices(JxW, c_val, v_val, N1_gp, N2_gp, GradN1_gp, GradN2_gp, sig, dsig_dc, K11, K12, K21, K22);
-    }
+
+        // Assemble tangent blocks K11 (scalar-scalar) and K12 (scalar-vector)
+        for (int I = 0; I < NPE1; ++I) {
+            for (int J = 0; J < NPE1; ++J) {
+                double K11_1 = dR1_1_dc * N1(I) * N1(J) * JxW;
+
+                double K11_2 = dR1_1_dGradc.dot(N1(I) * GradN1.row(J).transpose()) * JxW;
+
+                double K11_3 = dR1_2_dc.dot(GradN1.row(I).transpose()) * N1(J) * JxW;
+
+                double K11_4 = 0.0;
+                for (int i = 0; i < PD; ++i)
+                    for (int j = 0; j < PD; ++j)
+                        K11_4 += dR1_2_dGradc(i, j) * GradN1(I, i) * GradN1(J, j) * JxW;
+
+                double K = K11_1 + K11_2 + K11_3 + K11_4;
+                K11(I, J) += K;
+            }
+
+            for (int J = 0; J < NPE2; ++J) {
+                Eigen::VectorXd K12_1 = dR1_1_dv * (N1(I) * N2(J) * JxW);
+
+                Eigen::VectorXd K12_2 = dR1_1_dGradv * (N1(I) * JxW) * GradN2.row(J).transpose();
+
+                Eigen::VectorXd K12_3 = dR1_2_dv.transpose()
+                                        * (GradN1.row(I).transpose() * (N2(J) * JxW));
+
+                Eigen::VectorXd K12_4 = Eigen::VectorXd::Zero(PD);
+                for (int i = 0; i < PD; ++i)
+                    for (int j = 0; j < PD; ++j)
+                        for (int l = 0; l < PD; ++l)
+                            K12_4(i) += dR1_2_dGradv[i](j, l) * GradN1(I, j) * GradN2(J, l) * JxW;
+
+                Eigen::RowVectorXd K = (K12_1 + K12_2 + K12_3 + K12_4).transpose(); // 1×PD
+                K12.block(I, J * PD, 1, PD) += K;
+            }
+        }
+
+        // Assemble tangent blocks K21 (vector–scalar) and K22 (vector–vector)
+        // Assemble tangent blocks K21 (vector–scalar) and K22 (vector–vector)
+        for (int I = 0; I < NPE2; ++I) {
+            for (int J = 0; J < NPE1; ++J) {
+                Eigen::VectorXd K21_1 = dR2_1_dc * (N2(I) * N1(J) * JxW);
+
+                Eigen::VectorXd K21_2 = dR2_1_dGradc * (N2(I) * JxW) * GradN1.row(J).transpose();
+
+                Eigen::VectorXd K21_3 = dR2_2_dc * (GradN2.row(I).transpose() * (N1(J) * JxW));
+
+                Eigen::VectorXd K21_4 = Eigen::VectorXd::Zero(PD);
+                for (int i = 0; i < PD; ++i)
+                    for (int j = 0; j < PD; ++j)
+                        for (int k = 0; k < PD; ++k)
+                            K21_4(i) += dR2_2_dGradc[i](j, k) * GradN2(I, j) * GradN1(J, k) * JxW;
+
+                Eigen::VectorXd K = K21_1 + K21_2 + K21_3 + K21_4; // PD×1
+                K21.block(I * PD, J, PD, 1) += K;
+            }
+
+            for (int J = 0; J < NPE2; ++J) {
+                Eigen::MatrixXd K22_1 = dR2_1_dv * (N2(I) * N2(J) * JxW);
+
+                Eigen::MatrixXd K22_2 = Eigen::MatrixXd::Zero(PD, PD);
+                for (int i = 0; i < PD; ++i)
+                    for (int j = 0; j < PD; ++j)
+                        for (int l = 0; l < PD; ++l)
+                            K22_2(i, j) += dR2_1_dGradv[i](j, l) * N2(I) * GradN2(J, l) * JxW;
+
+                Eigen::MatrixXd K22_3 = Eigen::MatrixXd::Zero(PD, PD);
+                for (int i = 0; i < PD; ++i)
+                    for (int k = 0; k < PD; ++k)
+                        for (int j = 0; j < PD; ++j)
+                            K22_3(i, k) += dR2_2_dv[i](j, k) * GradN2(I, j) * N2(J) * JxW;
+
+                Eigen::MatrixXd K22_4 = Eigen::MatrixXd::Zero(PD, PD);
+                for (int i = 0; i < PD; ++i)
+                    for (int k = 0; k < PD; ++k)
+                        for (int j = 0; j < PD; ++j)
+                            for (int m = 0; m < PD; ++m)
+                                K22_4(i, k) += dR2_2_dGradv[i][j](k, m) * GradN2(I, j) * GradN2(J, m) * JxW;
+
+                Eigen::MatrixXd K = K22_1 + K22_2 + K22_3 + K22_4; // PD×PD
+                K22.block(I * PD, J * PD, PD, PD) += K;
+            }
+        }
+
+
+    } // end gp loop
 
     return {R1, R2, K11, K12, K21, K22};
 }
@@ -530,3 +702,95 @@ std::pair<Eigen::MatrixXd, Eigen::MatrixXd> element::RK_GP(double dt, int NGP_va
 
 
 
+
+// --- helpers (local to this file) ---
+static void printVecInts(const Eigen::VectorXd& v) {
+    std::cout << "[";
+    for (int i = 0; i < v.size(); ++i) {
+        int val = static_cast<int>(std::llround(v(i)));
+        std::cout << val << (i + 1 < v.size() ? "," : "");
+    }
+    std::cout << "]";
+}
+
+static void printVecDoubles(const Eigen::VectorXd& v) {
+    std::cout << "[";
+    for (int i = 0; i < v.size(); ++i) {
+        std::cout << std::fixed << std::setprecision(4) << v(i)
+                  << (i + 1 < v.size() ? "," : "");
+    }
+    std::cout << "]";
+}
+
+static void printMatrixRows(const Eigen::MatrixXd& M) {
+    if (M.size() == 0) { std::cout << "[]"; return; }
+    std::cout << "[";
+    for (int r = 0; r < M.rows(); ++r) {
+        for (int c = 0; c < M.cols(); ++c) {
+            std::cout << std::fixed << std::setprecision(4) << M(r, c);
+            if (c + 1 < M.cols()) std::cout << ",";
+        }
+        if (r + 1 < M.rows()) std::cout << ";";
+    }
+    std::cout << "]";
+}
+
+static void printStdVec(const std::vector<double>& a) {
+    std::cout << "[";
+    for (size_t i = 0; i < a.size(); ++i) {
+        std::cout << std::fixed << std::setprecision(4) << a[i]
+                  << (i + 1 < a.size() ? "," : "");
+    }
+    std::cout << "]";
+}
+
+// --- pretty “Property  Value” line ---
+static void prop(const std::string& name, const std::function<void()>& printer) {
+    std::cout << std::left << std::setw(10) << name << " ";
+    printer();
+    std::cout << "\n";
+}
+
+// --- instance method (so you can call EL[k].disp()) ---
+void element::disp() const {
+    std::cout << "EL(" << (Nr + 1) << ", 1)\n";  // mimic MATLAB 1-based display header
+
+    prop("Nr",     [&]{ std::cout << (Nr + 1); });
+    prop("NdL1",   [&]{ printVecInts(NdL1); });
+    prop("NdL2",   [&]{ printVecInts(NdL2); });
+    prop("NPE1",   [&]{ std::cout << NPE1; });
+    prop("NPE2",   [&]{ std::cout << NPE2; });
+    prop("deg1",   [&]{ std::cout << deg1; });
+    prop("deg2",   [&]{ std::cout << deg2; });
+
+    // Geometry and fields (printed compactly, row/semicolon format like MATLAB)
+    prop("X",      [&]{ printMatrixRows(X); });
+    prop("C",      [&]{ printVecDoubles(C); });
+    prop("V",      [&]{ printMatrixRows(V); });
+    prop("x",      [&]{ printMatrixRows(x); });
+    prop("c",      [&]{ printVecDoubles(c); });
+    prop("v",      [&]{ printMatrixRows(v); });
+    prop("xn",      [&]{ printMatrixRows(xn); });
+    prop("cn",      [&]{ printVecDoubles(cn); });
+    prop("vn",      [&]{ printMatrixRows(vn); });
+
+
+    // Optional extras (handy for quick checks)
+    prop("parameters", [&]{
+        if (parameters.empty()) std::cout << "[]";
+        else printStdVec(parameters);
+    });
+    prop("NGP",    [&]{ std::cout << NGP; });
+    prop("GP",     [&]{ printMatrixRows(GP); });
+    prop("PD",     [&]{ std::cout << PD; });
+}
+
+// --- free function to print by index from a std::vector<element> ---
+void dispEL(const std::vector<element>& EL, int index_one_based) {
+    int idx = index_one_based - 1;
+    if (idx < 0 || idx >= static_cast<int>(EL.size())) {
+        std::cerr << "dispEL: index out of range (" << index_one_based << ")\n";
+        return;
+    }
+    EL[idx].disp();
+}

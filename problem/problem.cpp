@@ -8,6 +8,7 @@
 
 #include <set>
 
+typedef Eigen::SparseMatrix<double> SpMat; // declares a column-major sparse matrix type of double
 
 problem_coupled::problem_coupled(
         int PD,
@@ -50,7 +51,7 @@ problem_coupled::problem_coupled(
 
     // === Assign boundary conditions ===
     Assign_BC(Corners);  // fills BC and DOFs
-    Assign_DOF_DBC();    // computes global DOF numbering
+    //Assign_DOF_DBC();    // computes global DOF numbering
 
     // === Assign Gauss Point DOFs if requested ===
     if (GP_vals == "On") {
@@ -59,6 +60,7 @@ problem_coupled::problem_coupled(
 
     // === Output problem setup info ===
     problem_info();  // displays PD, mesh, DOFs, etc.
+    solve();
 }
 
 
@@ -273,108 +275,93 @@ void problem_coupled::Assign_BC(const std::string Corners) {
 }
 
 void problem_coupled::Assign_DOF_DBC() {
+    int NoNs = static_cast<int>(Node_List.size());
     int dofs = 0;
-    int NoNs = Node_List.size();
 
     for (int i = 0; i < NoNs; ++i) {
-        Eigen::VectorXd& BC = Node_List[i].BC;
-        Eigen::VectorXd& DOF = Node_List[i].DOF;
-
-        if (DOF.size() != BC.size()) {
-            DOF = Eigen::VectorXd::Zero(BC.size());
-        }
+        Eigen::VectorXd BC  = Node_List[i].BC;   // copy, like MATLAB
+        Eigen::VectorXd DOF = Node_List[i].DOF;  // copy
 
         for (int p = 0; p < BC.size(); ++p) {
-            if (BC(p) == 1) {
-                ++dofs;
+            if (BC(p) == 1.0) {
+                std::cout<< "node: "<< i<<std::endl;
+                dofs = dofs + 1;
                 DOF(p) = dofs;
             }
         }
 
-        Node_List[i].DOF = DOF;
+        Node_List[i].DOF = DOF;  // write back
     }
 
-    DOFs = dofs;  // store the global number of DOFs
+    DOFs = dofs;  // total
 }
 
 
+
+// Assign DOFs with periodic BC (node index lists are already 0-based)
 void problem_coupled::Assign_DOF_PBC(const std::vector<int>& NLC,
                                      const std::vector<int>& NLS,
                                      const std::vector<int>& NLM,
-                                     const std::vector<int>& NLP) {
-    int dofs = 0;
+                                     const std::vector<int>& NLP)
+{
+    DOFs = 0;
 
-    int NoCNs = static_cast<int>(NLC.size());
-    int NoSNs = static_cast<int>(NLS.size());
-    int NoMNs = static_cast<int>(NLM.size());
-    int NoPNs = static_cast<int>(NLP.size());
+    const int NoCNs = static_cast<int>(NLC.size());
+    const int NoSNs = static_cast<int>(NLS.size());
+    const int NoMNs = static_cast<int>(NLM.size());
+    const int NoPNs = static_cast<int>(NLP.size());
 
-    // === Corner nodes ===
-    if (NoCNs > 0) {
+    // Corner nodes
+    if (NoCNs != 0) {
+        const int firstCorner = NLC[0];
+        auto& DOF0 = Node_List[firstCorner].DOF;
+        const auto& BC0 = Node_List[firstCorner].BC;
+        for (Eigen::Index p = 0; p < BC0.size(); ++p) {
+            if (BC0(p) == 1) {
+                ++DOFs;
+                DOF0(p) = static_cast<double>(DOFs);
+            }
+        }
         for (int i = 0; i < NoCNs; ++i) {
             int idx = NLC[i];
-            Eigen::VectorXd& BC = Node_List[idx].BC;
-            Eigen::VectorXd& DOF = Node_List[idx].DOF;
-
-            if (i == 0) {
-                for (int p = 0; p < BC.size(); ++p) {
-                    if (BC(p) == 1) {
-                        ++dofs;
-                        DOF(p) = dofs;
-                    }
-                }
-                Node_List[idx].DOF = DOF;
-            }
-
-            // Copy reference DOFs to all corners
-            Node_List[idx].DOF = Node_List[NLC[0]].DOF;
+            Node_List[idx].DOF = DOF0;
         }
     }
 
-    // === Star nodes ===
-    for (int idx : NLS) {
-        Eigen::VectorXd& BC = Node_List[idx].BC;
-        Eigen::VectorXd& DOF = Node_List[idx].DOF;
-
-        if (DOF.size() != BC.size())
-            DOF = Eigen::VectorXd::Zero(BC.size());
-
-        for (int p = 0; p < BC.size(); ++p) {
+    // Star nodes
+    for (int i = 0; i < NoSNs; ++i) {
+        int idx = NLS[i];
+        auto& DOF = Node_List[idx].DOF;
+        const auto& BC = Node_List[idx].BC;
+        for (Eigen::Index p = 0; p < BC.size(); ++p) {
             if (BC(p) == 1) {
-                ++dofs;
-                DOF(p) = dofs;
+                ++DOFs;
+                DOF(p) = static_cast<double>(DOFs);
             }
         }
-
-        Node_List[idx].DOF = DOF;
     }
 
-    // === Minus nodes ===
-    for (int idx : NLM) {
-        Eigen::VectorXd& BC = Node_List[idx].BC;
-        Eigen::VectorXd& DOF = Node_List[idx].DOF;
-
-        if (DOF.size() != BC.size())
-            DOF = Eigen::VectorXd::Zero(BC.size());
-
-        for (int p = 0; p < BC.size(); ++p) {
+    // Minus nodes
+    for (int i = 0; i < NoMNs; ++i) {
+        int idx = NLM[i];
+        auto& DOF = Node_List[idx].DOF;
+        const auto& BC = Node_List[idx].BC;
+        for (Eigen::Index p = 0; p < BC.size(); ++p) {
             if (BC(p) == 1) {
-                ++dofs;
-                DOF(p) = dofs;
+                ++DOFs;
+                DOF(p) = static_cast<double>(DOFs);
             }
         }
-
-        Node_List[idx].DOF = DOF;
     }
 
-    // === Plus nodes ===
-    for (size_t i = 0; i < NLP.size(); ++i) {
-        Node_List[NLP[i]].BC  = Node_List[NLM[i]].BC;
-        Node_List[NLP[i]].DOF = Node_List[NLM[i]].DOF;
+    // Plus nodes (copy from paired minus)
+    const int nCopy = std::min(NoPNs, NoMNs);
+    for (int i = 0; i < nCopy; ++i) {
+        int idxP = NLP[i];
+        int idxM = NLM[i];
+        Node_List[idxP].BC  = Node_List[idxM].BC;
+        Node_List[idxP].DOF = Node_List[idxM].DOF;
     }
-
-    // Save total count
-    DOFs = dofs;
 }
 
 void problem_coupled::Assign_GP_DOFs() {
@@ -401,8 +388,9 @@ void problem_coupled::Assign_GP_DOFs() {
 void problem_coupled::update(const Eigen::VectorXd& dx) {
     int NoNs = Node_List.size();
     int NoEs = Element_List.size();
-    int PD   = PD;
-
+    int PD   = this->PD;
+//    std::cout<<"dx" << std::endl;
+//    std::cout<<dx<<std::endl;
     // === Update node unknowns u based on DOFs and dx ===
     for (int i = 0; i < NoNs; ++i) {
         Eigen::VectorXd& BC  = Node_List[i].BC;
@@ -417,7 +405,8 @@ void problem_coupled::update(const Eigen::VectorXd& dx) {
                 }
             }
         }
-
+//        std::cout<<'u' <<std::endl;
+//        std::cout<<u<<std::endl;
         Node_List[i].u = u;
     }
 
@@ -425,25 +414,68 @@ void problem_coupled::update(const Eigen::VectorXd& dx) {
     for (int e = 0; e < NoEs; ++e) {
         auto& elem = Element_List[e];
 
-        int NPE1 = elem.NPE1;
-        int NPE2 = elem.NPE2;
+        const int NPE1 = elem.NPE1;
+        const int NPE2 = elem.NPE2;
 
-        // === Scalar field c (dimension 1) ===
-        Eigen::MatrixXd c(1, NPE1);
+        // === Scalar field c (keep EXACTLY as before) ===
+        Eigen::VectorXd c(NPE1);
         for (int i = 0; i < NPE1; ++i) {
-            int nodeIdx = static_cast<int>(elem.NdL1(i)) - 1;  // 1-based to 0-based
-            c(0, i) = Node_List[nodeIdx].u(0);  // scalar field is first entry
+            int nodeIdx = static_cast<int>(elem.NdL1(i)) - 1; // 1-based -> 0-based
+            c(i) = Node_List[nodeIdx].u(0);                  // c is the first entry
         }
+//        std::cout<<'c' <<std::endl;
+//        std::cout<<c<<std::endl;
         elem.c = c;
 
-        // === Vector field v (dimension PD) ===
+        // === Vector field v (use MATLAB first/last) ===
+        // MATLAB: dim = PD; first = last + 1; last = last + dim, with c: first=1,last=1
+        const int dim   = PD;
+        int last0  = 0;          // after c at index 0 in C++
+        int first0 = last0 + 1;  // v starts right after c -> index 1
+        last0     += dim;        // end index of v (unused here, kept for clarity)
+
         Eigen::MatrixXd v(PD, NPE2);
         for (int i = 0; i < NPE2; ++i) {
-            int nodeIdx = static_cast<int>(elem.NdL2(i)) - 1;
-            v.col(i) = Node_List[nodeIdx].u.segment(1, PD);  // vector field is offset by 1
+            int nodeIdx = static_cast<int>(elem.NdL2(i)) - 1; // 1-based -> 0-based
+            v.col(i) = Node_List[nodeIdx].u.segment(first0, dim); // u(first0 : first0+PD-1)
         }
+//        std::cout<<'v' <<std::endl;
+//        std::cout<<v<<std::endl;
         elem.v = v;
+
     }
+
+
+    // === Update element field values from updated nodal u ===
+//    for (int e = 0; e < NoEs; ++e) {
+//        auto& elem = Element_List[e];
+//
+//        int NPE1 = elem.NPE1;
+//        int NPE2 = elem.NPE2;
+//
+//        // === Scalar field c (dimension ) ===
+//// === Scalar field c (Vector of length NPE1) ===
+//        Eigen::VectorXd c(NPE1);
+//        for (int i = 0; i < NPE1; ++i) {
+//            int nodeIdx = static_cast<int>(elem.NdL1(i)) - 1; // 1-based -> 0-based
+//            // scalar field is the first entry in Node.u
+//            c(i) = Node_List[nodeIdx].u(0);
+//        }
+//        elem.c = c;  // OK: VectorXd -> VectorXd
+//
+//
+//        // === Vector field v (dimension PD) ===
+//        const int dim   = PD;
+//        const int first = last + 1;   // 1-based
+//        last += dim;
+//
+//        Eigen::MatrixXd v(PD, NPE2);
+//        for (int i = 0; i < NPE2; ++i) {
+//            int nodeIdx = static_cast<int>(elem.NdL2(i)) - 1;      // 1-based -> 0-based
+//            v.col(i) = Node_List[nodeIdx].u.segment(first - 1, dim); // u(first:last)
+//        }
+//        elem.v = v;
+//    }
 }
 
 void problem_coupled::update_GP(const Eigen::VectorXd& dx_gp) {
@@ -492,242 +524,272 @@ void problem_coupled::downdate_time() {
 }
 
 
-Eigen::VectorXd problem_coupled::Residual(double dt) {
-    int NoEs = Element_List.size();
-    int NoNs = Node_List.size();
+// Global residual assembly (R1 and R2)
+Eigen::VectorXd problem_coupled::Residual(double dt)
+{
+    const int NoEs  = static_cast<int>(Element_List.size());
+    if (NoEs == 0) return Eigen::VectorXd::Zero(DOFs);
 
-    // Assuming first element is representative for all
-    int NPE1 = Element_List[0].NPE1;
-    int NPE2 = Element_List[0].NPE2;
+    const int NPE1 = Element_List[0].NPE1;
+    const int NPE2 = Element_List[0].NPE2;
 
     Eigen::VectorXd Rtot = Eigen::VectorXd::Zero(DOFs);
 
     for (int e = 0; e < NoEs; ++e) {
         auto [R1, R2] = Element_List[e].Residual(dt);
+        const auto& NdL1 = Element_List[e].NdL1; // 1-based ids
+        const auto& NdL2 = Element_List[e].NdL2;
 
-        const Eigen::VectorXd& NdL1 = Element_List[e].NdL1;
-        const Eigen::VectorXd& NdL2 = Element_List[e].NdL2;
+        // R1 (scalar)
+        {
+            const int dim    = 1;          // cell
+            const int first0 = 0;          // MATLAB first=1  ->  C++ 0
+            const int last0  = first0 + dim - 1; // = 0
 
-        // === R1: Scalar field residual ===
-        int dim = 1;
-        int first = 0;
-        int last  = dim;
+            for (int i = 0; i < NPE1; ++i) {
+                const int nodeIdx = static_cast<int>(NdL1(i)) - 1;   // 1-based -> 0-based
+                const auto& BC  = Node_List[nodeIdx].BC;
+                const auto& DOF = Node_List[nodeIdx].DOF;
 
-        for (int i = 0; i < NPE1; ++i) {
-            int nodeIdx = static_cast<int>(NdL1(i)) - 1;
-            const Eigen::VectorXd& BC  = Node_List[nodeIdx].BC;
-            const Eigen::VectorXd& DOF = Node_List[nodeIdx].DOF;
-
-            for (int p = first; p < last; ++p) {
-                if (BC(p) == 1) {
-                    int dof_idx = static_cast<int>(DOF(p)) - 1;
-                    if (dof_idx >= 0 && dof_idx < Rtot.size()) {
-                        int r_idx = i * dim + (p - first);
-                        Rtot(dof_idx) += R1(r_idx);
+                for (int p0 = first0; p0 <= last0; ++p0) {          // only p0 = 0
+                    if (BC(p0) == 1) {
+                        const int g = static_cast<int>(DOF(p0)) - 1;    // global DOF 1-based -> 0-based
+                        const int r = i * dim + (p0 - first0);          // = i
+                        if (g >= 0 && g < Rtot.size() && r >= 0 && r < R1.size()) {
+                            Rtot(g) += R1(r);
+                        }
                     }
                 }
             }
         }
 
-        // === R2: Vector field residual ===
-        dim = PD;
-        first = last;
-        last = first + dim;
 
-        for (int i = 0; i < NPE2; ++i) {
-            int nodeIdx = static_cast<int>(NdL2(i)) - 1;
-            const Eigen::VectorXd& BC  = Node_List[nodeIdx].BC;
-            const Eigen::VectorXd& DOF = Node_List[nodeIdx].DOF;
+        // R2 (vector)
+        {
+            const int dim   = this->PD;       // velocity block size
+            const int first0 = 1;             // zero-based: v starts right after c at index 0
+            const int last0  = first0 + dim - 1;
 
-            for (int p = first; p < last; ++p) {
-                if (BC(p) == 1) {
-                    int dof_idx = static_cast<int>(DOF(p)) - 1;
-                    if (dof_idx >= 0 && dof_idx < Rtot.size()) {
-                        int r_idx = i * dim + (p - first);
-                        Rtot(dof_idx) += R2(r_idx);
+            for (int i = 0; i < NPE2; ++i) {
+                const int nodeIdx = static_cast<int>(NdL2(i)) - 1;   // 1-based -> 0-based
+                const auto& BC  = Node_List[nodeIdx].BC;
+                const auto& DOF = Node_List[nodeIdx].DOF;
+
+                for (int p0 = first0; p0 <= last0; ++p0) {          // p0 in [1, PD]
+                    if (BC(p0) == 1) {
+                        const int g = static_cast<int>(DOF(p0)) - 1;    // global DOF: 1-based -> 0-based
+                        const int r = i * dim + (p0 - first0);          // R2 index: 0..(NPE2*PD-1)
+                        if (g >= 0 && g < Rtot.size() && r >= 0 && r < R2.size()) {
+                            Rtot(g) += R2(r);
+                        }
                     }
                 }
             }
         }
+
     }
 
     return Rtot;
 }
 
 
+
 void problem_coupled::assemble(double dt) {
-    int NoEs = Element_List.size();
-    int NPE1 = Element_List[0].NPE1;
-    int NPE2 = Element_List[0].NPE2;
+    // === MATLAB: NoEs = size(EL,2); NoNs = size(NL,2); ===
+    const int NoEs = static_cast<int>(Element_List.size());
+    const int NoNs = static_cast<int>(Node_List.size());
 
-    std::vector<Eigen::Triplet<double>> triplets;
-    Rtot = Eigen::VectorXd::Zero(DOFs);
-
-    for (int e = 0; e < NoEs; ++e) {
-        auto [R1, R2, K11, K12, K21, K22] = Element_List[e].RK(dt);
-        const Eigen::VectorXd& NdL1 = Element_List[e].NdL1;
-        const Eigen::VectorXd& NdL2 = Element_List[e].NdL2;
-
-        // === Assemble R1 ===
-        int dim = 1;
-        int first = 0;
-        int last = dim;
-
-        for (int i = 0; i < NPE1; ++i) {
-            int node_i = static_cast<int>(NdL1(i)) - 1;
-            const auto& BC_i = Node_List[node_i].BC;
-            const auto& DOF_i = Node_List[node_i].DOF;
-
-            for (int p = first; p < last; ++p) {
-                if (BC_i(p) == 1) {
-                    int dof_idx = static_cast<int>(DOF_i(p)) - 1;
-                    int r_idx = i * dim + (p - first);
-                    if (dof_idx >= 0) {
-                        Rtot(dof_idx) += R1(r_idx);
-                    }
-                }
-            }
-        }
-
-        // === Assemble R2 ===
-        dim = PD;
-        first = last;
-        last = first + dim;
-
-        for (int i = 0; i < NPE2; ++i) {
-            int node_i = static_cast<int>(NdL2(i)) - 1;
-            const auto& BC_i = Node_List[node_i].BC;
-            const auto& DOF_i = Node_List[node_i].DOF;
-
-            for (int p = first; p < last; ++p) {
-                if (BC_i(p) == 1) {
-                    int dof_idx = static_cast<int>(DOF_i(p)) - 1;
-                    int r_idx = i * dim + (p - first);
-                    if (dof_idx >= 0) {
-                        Rtot(dof_idx) += R2(r_idx);
-                    }
-                }
-            }
-        }
-
-        // === Assemble K11 & K12 ===
-        int dim_i = 1;
-        int first_i = 0;
-        int last_i = dim_i;
-
-        for (int i = 0; i < NPE1; ++i) {
-            int node_i = static_cast<int>(NdL1(i)) - 1;
-            const auto& BC_i = Node_List[node_i].BC;
-            const auto& DOF_i = Node_List[node_i].DOF;
-
-            for (int p = first_i; p < last_i; ++p) {
-                if (BC_i(p) == 1) {
-                    int row = static_cast<int>(DOF_i(p)) - 1;
-
-                    // K11
-                    int dim_j = 1;
-                    int first_j = 0;
-                    int last_j = dim_j;
-
-                    for (int j = 0; j < NPE1; ++j) {
-                        int node_j = static_cast<int>(NdL1(j)) - 1;
-                        const auto& BC_j = Node_List[node_j].BC;
-                        const auto& DOF_j = Node_List[node_j].DOF;
-
-                        for (int q = first_j; q < last_j; ++q) {
-                            if (BC_j(q) == 1) {
-                                int col = static_cast<int>(DOF_j(q)) - 1;
-                                int k_idx_row = i * dim_i + (p - first_i);
-                                int k_idx_col = j * dim_j + (q - first_j);
-                                triplets.emplace_back(row, col, K11(k_idx_row, k_idx_col));
-                            }
-                        }
-                    }
-
-                    // K12
-                    dim_j = PD;
-                    first_j = last_j;
-                    last_j = first_j + dim_j;
-
-                    for (int j = 0; j < NPE2; ++j) {
-                        int node_j = static_cast<int>(NdL2(j)) - 1;
-                        const auto& BC_j = Node_List[node_j].BC;
-                        const auto& DOF_j = Node_List[node_j].DOF;
-
-                        for (int q = first_j; q < last_j; ++q) {
-                            if (BC_j(q) == 1) {
-                                int col = static_cast<int>(DOF_j(q)) - 1;
-                                int k_idx_row = i * dim_i + (p - first_i);
-                                int k_idx_col = j * dim_j + (q - first_j);
-                                triplets.emplace_back(row, col, K12(k_idx_row, k_idx_col));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // === Assemble K21 & K22 ===
-        dim_i = PD;
-        first_i = 1;
-        last_i = first_i + dim_i;
-
-        for (int i = 0; i < NPE2; ++i) {
-            int node_i = static_cast<int>(NdL2(i)) - 1;
-            const auto& BC_i = Node_List[node_i].BC;
-            const auto& DOF_i = Node_List[node_i].DOF;
-
-            for (int p = first_i; p < last_i; ++p) {
-                if (BC_i(p) == 1) {
-                    int row = static_cast<int>(DOF_i(p)) - 1;
-
-                    // K21
-                    int dim_j = 1;
-                    int first_j = 0;
-                    int last_j = dim_j;
-
-                    for (int j = 0; j < NPE1; ++j) {
-                        int node_j = static_cast<int>(NdL1(j)) - 1;
-                        const auto& BC_j = Node_List[node_j].BC;
-                        const auto& DOF_j = Node_List[node_j].DOF;
-
-                        for (int q = first_j; q < last_j; ++q) {
-                            if (BC_j(q) == 1) {
-                                int col = static_cast<int>(DOF_j(q)) - 1;
-                                int k_idx_row = i * dim_i + (p - first_i);
-                                int k_idx_col = j * dim_j + (q - first_j);
-                                triplets.emplace_back(row, col, K21(k_idx_row, k_idx_col));
-                            }
-                        }
-                    }
-
-                    // K22
-                    dim_j = PD;
-                    first_j = 1;
-                    last_j = first_j + dim_j;
-
-                    for (int j = 0; j < NPE2; ++j) {
-                        int node_j = static_cast<int>(NdL2(j)) - 1;
-                        const auto& BC_j = Node_List[node_j].BC;
-                        const auto& DOF_j = Node_List[node_j].DOF;
-
-                        for (int q = first_j; q < last_j; ++q) {
-                            if (BC_j(q) == 1) {
-                                int col = static_cast<int>(DOF_j(q)) - 1;
-                                int k_idx_row = i * dim_i + (p - first_i);
-                                int k_idx_col = j * dim_j + (q - first_j);
-                                triplets.emplace_back(row, col, K22(k_idx_row, k_idx_col));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    // Guard for empty meshes (optional, but safer)
+    if (NoEs == 0 || NoNs == 0) {
+        Rtot = Eigen::VectorXd::Zero(DOFs);
+        Ktot = Eigen::SparseMatrix<double>(DOFs, DOFs);
+        return;
     }
 
-    // Finalize global stiffness matrix
+    // === MATLAB: NPE1 = EL(1).NPE1; NPE2 = EL(1).NPE2; ===
+    const int NPE1 = Element_List[0].NPE1;
+    const int NPE2 = Element_List[0].NPE2;
+
+    // === MATLAB: Rtot = zeros(DOFs,1); ===
+    Rtot = Eigen::VectorXd::Zero(DOFs);
+
+    // === MATLAB: sprC = 0; % sparse counter ===
+    // We'll track triplets instead of a manual counter.
+    std::vector<Eigen::Triplet<double>> triplets;
+
+    // === MATLAB: for e = 1:NoEs ... end  (empty body for now) ===
+    for (int e = 0; e < NoEs; ++e) {
+        // Assemble contribution of R1
+
+        auto [R1, R2, K11, K12, K21, K22] = Element_List[e].RK(dt);
+        const auto& NdL1 = Element_List[e].NdL1;
+        const auto& NdL2 = Element_List[e].NdL2;
+
+        const int dim   = 1;
+        const int first = 0;
+        const int last  = dim - 1;
+
+            for (int i = 0; i < NPE1; ++i)
+            {
+                int nodeIdx = static_cast<int>(NdL1(i)) - 1;
+                const auto& BC  = Node_List[nodeIdx].BC;
+                const auto& DOF = Node_List[nodeIdx].DOF;
+
+                for (int p = first; p <= last; ++p)
+                {
+                    if (BC(p) == 1)
+                    {
+                        int g = static_cast<int>(DOF(p)) - 1;
+                        int r = i * dim + p;
+                        Rtot(g) += R1(r);
+                    }
+                }
+
+            }
+
+        // Assemble contribution of R2
+        {
+            int dim = PD;
+            int first = 1;         // corresponds to MATLAB last+1 (last=0 above)
+            int last = first + dim - 1;
+
+            for (int i = 0; i < NPE2; ++i) {
+                int nodeIdx = static_cast<int>(NdL2(i)) - 1;
+                const auto &BC = Node_List[nodeIdx].BC;
+                const auto &DOF = Node_List[nodeIdx].DOF;
+
+                for (int p = first; p <= last; ++p) {
+                    if (BC(p) == 1) {
+                        int g = static_cast<int>(DOF(p)) - 1;
+                        int r = i * dim + (p - first);
+                        Rtot(g) += R2(r);
+                    }
+                }
+
+            }
+        }
+        // Assemble contributions of K11 and K12 into triplets
+        {
+            const int dim_i = 1;
+            const int first_i = 0, last_i = 0;
+
+            for (int i = 0; i < NPE1; ++i) {
+                int node_i = static_cast<int>(NdL1(i)) - 1;
+                const auto& BC_i  = Node_List[node_i].BC;
+                const auto& DOF_i = Node_List[node_i].DOF;
+
+                for (int p = first_i; p <= last_i; ++p) {
+                    if (BC_i(p) != 1) continue;
+
+                    const int row = static_cast<int>(DOF_i(p)) - 1;
+
+                    // --- K11 ---
+                    {
+                        const int dim_j = 1;
+                        const int first_j = 0, last_j = 0;
+
+                        for (int j = 0; j < NPE1; ++j) {
+                            int node_j = static_cast<int>(NdL1(j)) - 1;
+                            const auto& BC_j  = Node_List[node_j].BC;
+                            const auto& DOF_j = Node_List[node_j].DOF;
+
+                            for (int q = first_j; q <= last_j; ++q) {
+                                if (BC_j(q) != 1) continue;
+
+                                const int col = static_cast<int>(DOF_j(q)) - 1;
+                                const int rloc = i * dim_i + (p - first_i);          // = i
+                                const int cloc = j * dim_j + (q - first_j);          // = j
+                                triplets.emplace_back(row, col, K11(rloc, cloc));
+                            }
+                        }
+                    }
+
+                    // --- K12 ---
+                    {
+                        const int dim_j = PD;
+                        const int first_j = 1, last_j = first_j + dim_j - 1;        // 1..PD
+
+                        for (int j = 0; j < NPE2; ++j) {
+                            int node_j = static_cast<int>(NdL2(j)) - 1;
+                            const auto& BC_j  = Node_List[node_j].BC;
+                            const auto& DOF_j = Node_List[node_j].DOF;
+
+                            for (int q = first_j; q <= last_j; ++q) {
+                                if (BC_j(q) != 1) continue;
+
+                                const int col  = static_cast<int>(DOF_j(q)) - 1;
+                                const int rloc = i * dim_i + (p - first_i);          // = i
+                                const int cloc = j * dim_j + (q - first_j);          // j*PD + (q-1)
+                                triplets.emplace_back(row, col, K12(rloc, cloc));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Assemble contributions of K21 and K22 into triplets
+        {
+            const int dim_i = PD;
+            const int first_i = 1, last_i = first_i + dim_i - 1;   // velocity block: 1..PD
+
+            for (int i = 0; i < NPE2; ++i) {
+                int node_i = static_cast<int>(NdL2(i)) - 1;
+                const auto& BC_i  = Node_List[node_i].BC;
+                const auto& DOF_i = Node_List[node_i].DOF;
+
+                for (int p = first_i; p <= last_i; ++p) {
+                    if (BC_i(p) != 1) continue;
+                    const int row = static_cast<int>(DOF_i(p)) - 1;
+                    const int rloc = i * dim_i + (p - first_i);     // i*PD + (p-1)
+
+                    // --- K21 ---
+                    {
+                        const int dim_j = 1;
+                        const int first_j = 0, last_j = 0;          // scalar block: 0..0
+
+                        for (int j = 0; j < NPE1; ++j) {
+                            int node_j = static_cast<int>(NdL1(j)) - 1;
+                            const auto& BC_j  = Node_List[node_j].BC;
+                            const auto& DOF_j = Node_List[node_j].DOF;
+
+                            for (int q = first_j; q <= last_j; ++q) {
+                                if (BC_j(q) != 1) continue;
+                                const int col  = static_cast<int>(DOF_j(q)) - 1;
+                                const int cloc = j * dim_j + (q - first_j); // = j
+                                triplets.emplace_back(row, col, K21(rloc, cloc));
+                            }
+                        }
+                    }
+
+                    // --- K22 ---
+                    {
+                        const int dim_j = PD;
+                        const int first_j = 1, last_j = first_j + dim_j - 1; // velocity block: 1..PD
+
+                        for (int j = 0; j < NPE2; ++j) {
+                            int node_j = static_cast<int>(NdL2(j)) - 1;
+                            const auto& BC_j  = Node_List[node_j].BC;
+                            const auto& DOF_j = Node_List[node_j].DOF;
+
+                            for (int q = first_j; q <= last_j; ++q) {
+                                if (BC_j(q) != 1) continue;
+                                const int col  = static_cast<int>(DOF_j(q)) - 1;
+                                const int cloc = j * dim_j + (q - first_j); // j*PD + (q-1)
+                                triplets.emplace_back(row, col, K22(rloc, cloc));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+    }
+
+    // Build an (empty-for-now) global K to keep the function self-contained
     Ktot = Eigen::SparseMatrix<double>(DOFs, DOFs);
     Ktot.setFromTriplets(triplets.begin(), triplets.end());
+
 }
 
 void problem_coupled::assemble_GP(double dt) {
@@ -736,7 +798,7 @@ void problem_coupled::assemble_GP(double dt) {
     int NPE1 = Element_List[0].NPE1;
     int NGP_val = Node_List[0].GP_BC.size();  // Number of Gauss point values
 
-    Rtot = Eigen::VectorXd::Zero(GP_DOFs * NGP_val);
+    Rtot_GP = Eigen::VectorXd::Zero(GP_DOFs * NGP_val);
     std::vector<Eigen::Triplet<double>> triplets;
 
     for (int e = 0; e < NoEs; ++e) {
@@ -756,7 +818,7 @@ void problem_coupled::assemble_GP(double dt) {
                         if (dof_idx >= 0) {
                             int global_row = dof_idx * NGP_val + s;
                             int local_row = i * 1 + (p - 0);  // equivalent to i in this case
-                            Rtot(global_row) += R(local_row, s);
+                            Rtot_GP(global_row) += R(local_row, s);
                         }
                     }
                 }
@@ -793,8 +855,8 @@ void problem_coupled::assemble_GP(double dt) {
     }
 
     // Finalize Ktot_GP sparse matrix
-    Ktot = Eigen::SparseMatrix<double>(GP_DOFs, GP_DOFs);
-    Ktot.setFromTriplets(triplets.begin(), triplets.end());
+    Ktot_GP = Eigen::SparseMatrix<double>(GP_DOFs, GP_DOFs);
+    Ktot_GP.setFromTriplets(triplets.begin(), triplets.end());
 }
 
 Eigen::MatrixXd problem_coupled::Get_all_velocity() {
@@ -904,3 +966,224 @@ std::pair<double, double> problem_coupled::calculate_max_min_difference() {
 //
 //    return out;
 //}
+
+// Optional tiny helpers
+static inline Eigen::VectorXd solve_sparse_linear_system(
+        const Eigen::SparseMatrix<double>& A, const Eigen::VectorXd& b)
+{
+    // Try a fast direct SPD solver first
+    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> ldlt;
+    ldlt.compute(A);
+    if (ldlt.info() == Eigen::Success) {
+        std::cout<<"solved using simplicial"<<std::endl;
+        return ldlt.solve(b);
+    }
+    // Fall back to general sparse LU
+    Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
+    slu.analyzePattern(A);
+    slu.factorize(A);
+    if (slu.info() == Eigen::Success) {
+        std::cout<< "solved using slu"<<std::endl;
+        return slu.solve(b);
+    }
+    // Last resort: iterative
+    Eigen::BiCGSTAB<Eigen::SparseMatrix<double>> bicg;
+    bicg.compute(A);
+    return bicg.solve(b);
+}
+
+void problem_coupled::post_process() {
+    // Minimal stub so you can compile/run. Hook your 1D/2D/3D exporters here.
+    // e.g., write nodal c and v to file if you want.
+}
+
+void problem_coupled::output_step_info() {
+    std::ofstream file(filename, std::ios::app);
+    file << "\nStep number: " << counter
+         << ",   Time increment: " << dt
+         << ",   Current time: " << t << "\n\n";
+}
+
+void problem_coupled::solve() {
+    // Drive the full Newton–Raphson time integration, mirroring your MATLAB flow.
+    t = 0.0;
+    counter = 1;
+
+    while (t < T) {
+        std::ofstream file(filename, std::ios::app);
+
+        int  error_counter = 1;
+        bool isNotAccurate = true;
+        bool try_again     = false;
+
+        while (isNotAccurate) {
+            // ---------- Residual + Tangent ----------
+            assemble(dt);  // fills: Ktot (Sparse), Rtot (Vector)
+            double Norm_R0 = 1.0;
+//            std::cout<<"Ktot at the end of first assemble"<<std::endl;
+//            std::cout<<Eigen::MatrixXd (Ktot).rows() << " x "<< Eigen::MatrixXd (Ktot).cols() <<std::endl;
+//            Eigen::MatrixXd dense = Eigen::MatrixXd(Ktot);
+//            std::cout<<dense<<std::endl;
+//            std::cout << " column (0):\n"
+//                      << dense.col(0) << "\n";
+//            std::cout << " column (1):\n"
+//                      << dense.col(1) << "\n";
+//            std::cout << " column (10):\n"
+//                      << dense.col(10) << "\n";
+//            std::cout<<"Rtot"<<std::endl;
+//            std::cout<<Rtot<<std::endl;
+
+            // ---------- Initial output & predictor residual ----------
+
+            if (error_counter == 1) {
+                if (counter == 1 && GP_vals == "On") {
+                    assemble_GP(dt);
+                    Eigen::VectorXd dx_GP = solve_sparse_linear_system(Ktot_GP, Rtot_GP);
+                    update_GP(dx_GP);
+                }
+
+                // initial PostProcess (optional; mirrors MATLAB)
+               //post_process();
+
+                double Norm_R0 = Rtot.norm();
+                std::cout << "Residual Norm at Predictor               : "
+                          << std::scientific << Rtot.norm()
+                          << " , normalized : 1\n";
+                file << "Residual Norm at Predictor               : "
+                     << std::scientific << Rtot.norm()
+                     << " , normalized : 1\n";
+            }
+
+            // ---------- Solve & update (Corrector) ----------
+            // MATLAB has: dx = -K \ R
+            // We solve K y = R then take dx = -y
+//            auto testing=Ktot;
+//            auto b=Rtot;
+//            std::cout<<"Frist try"<< "\n";
+//            Eigen::SimplicialCholesky<SpMat> chol(testing);  // performs a Cholesky factorization of A
+//            Eigen::VectorXd x = chol.solve(b);
+//            std::cout<<"x"<<std::endl;
+//            std::cout <<x<<std::endl;
+//
+
+
+            std::cout<<"second try" <<std::endl;
+            // Fall back to general sparse LU
+            auto testing2=Ktot;
+            auto b2=Rtot;
+
+            Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
+            slu.analyzePattern(testing2);
+            slu.factorize(testing2);
+            //std::cout<< "solved using slu"<<std::endl;
+            Eigen::VectorXd  dx = slu.solve(-b2);
+//            std::cout<<"dx"<<std::endl;
+//            std::cout <<dx<<std::endl;
+
+//            std::cout<<"third try" <<std::endl;
+//            // Fall back to general sparse LU
+//            auto testing3=Ktot;
+//            auto b3=Rtot;
+//            // Last resort: iterative
+//            Eigen::BiCGSTAB<Eigen::SparseMatrix<double>> bicg;
+//            bicg.compute(testing3);
+//            Eigen::VectorXd x3= bicg.solve(b);
+//            std::cout<<"x3"<<std::endl;
+//            std::cout <<x3<<std::endl;
+
+
+
+//            Eigen::VectorXd dx = solve_sparse_linear_system(Ktot, Rtot);
+
+//
+//            std::cout<< "dx" <<std::endl;
+//            std::cout<<dx<<std::endl;
+            Eigen::VectorXd rcheck = Ktot * dx + Rtot;   // should be ~ zero
+            std::cout << "||K dx + R|| = " << rcheck.norm() << "\n";
+
+
+
+//            std::cout<<"y"<<std::endl;
+//            std::cout<<y<<std::endl;
+            update(dx);   // updates node and element unknowns from DOFs
+
+            // ---------- Recompute residual with updated values ----------
+            Rtot = Residual(dt);
+
+            const double Rn = Rtot.norm();
+            std::cout << "Residual Norm @ Increment " << error_counter
+                      << " at Corrector : " << std::scientific << Rn
+                      << " , normalized : " << (Norm_R0 > 0 ? Rn/Norm_R0 : 0.0) << "\n";
+            file << "Residual Norm @ Increment " << error_counter
+                 << " at Corrector : " << std::scientific << Rn
+                 << " , normalized : " << (Norm_R0 > 0 ? Rn/Norm_R0 : 0.0) << "\n";
+
+            // ---------- Convergence / failure checks ----------
+            if (Rn < tol) {
+                isNotAccurate = false;
+            } else if (error_counter > max_iter || Rn > 1e6) {
+                isNotAccurate = false;
+                std::cout << "Convergence is not obtained!\n";
+                file << "Convergence is not obtained!\n";
+                try_again = true;
+            }
+
+            ++error_counter;
+        } // end Newton iterations
+
+        // ---------- Early stop if velocities ~ 0 ----------
+        {
+            Eigen::MatrixXd velocity = Get_all_velocity();
+            if (velocity.cwiseAbs().maxCoeff() < 1e-6) {
+                post_process();
+                break;
+            }
+        }
+
+        // ---------- Time-step control ----------
+        if (try_again) {
+            if (dt < 1e-7) {
+                std::cout << "\nSimulation terminated due to the very small time increment\n";
+                file      << "\nSimulation terminated due to the very small time increment\n";
+                break;
+            } else {
+                dt = dt / time_factor;
+                std::cout << "\nReducing time step to: " << std::scientific << dt << "\n";
+                file      << "\nReducing time step to: " << std::scientific << dt << "\n";
+                downdate_time();
+            }
+        } else {
+            // Accept the step
+            t += dt;
+            ++counter;
+
+            if (GP_vals == "On") {
+                assemble_GP(dt);
+                Eigen::VectorXd dx_GP = solve_sparse_linear_system(Ktot_GP, Rtot_GP);
+                update_GP(dx_GP);
+            }
+
+            post_process();
+            update_time(); // commit c→cn, v→vn, u→un
+
+            if (time_incr_method == "Adaptive") {
+                if (error_counter < 5) {
+                    dt = dt * time_factor;
+                    std::ofstream f2(filename, std::ios::app);
+                    std::cout << "\nIncreasing time step to: " << std::scientific << dt << "\n\n";
+                    f2        << "\nIncreasing time step to: " << std::scientific << dt << "\n\n";
+                } else if (error_counter > 8) {
+                    dt = dt / time_factor;
+                    std::ofstream f2(filename, std::ios::app);
+                    std::cout << "\nReducing time step to: " << std::scientific << dt << "\n\n";
+                    f2        << "\nReducing time step to: " << std::scientific << dt << "\n\n";
+                }
+            }
+
+            output_step_info();
+        }
+
+        file.close();
+    } // while t < T
+}
+

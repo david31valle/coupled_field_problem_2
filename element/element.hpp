@@ -5,6 +5,8 @@
 #include "../utils/utils.hpp"
 #include <iostream>
 #include <tuple>
+#include <iomanip>
+#include <cmath>
 
 
 // Extended element class for coupled scalar-vector field FEM problems
@@ -72,6 +74,7 @@ public:
 
     // Print element info (for debugging)
     void printElementData() const;
+    void disp() const;
 
 private:
     // === Shape Functions and Jacobians (internal) ===

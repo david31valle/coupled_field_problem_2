@@ -1,5 +1,6 @@
 #pragma once
 #include "../Eigen/Dense"
+#include <iostream>
 #include <array>
 
 class Node {
@@ -30,4 +31,20 @@ public:
          const Eigen::VectorXd& C, const Eigen::VectorXd& V,
          const Eigen::MatrixXd& EIL1, const Eigen::MatrixXd& EIL2,
          const Eigen::VectorXd& field_input, const Eigen::Vector2i& field_dim);
+
+    void printNode() const {
+        std::cout << "Node " << Nr << " (PD=" << PD << ")\n";
+        std::cout << "  X  = " << X.transpose() << "\n";
+        std::cout << "  x  = " << x.transpose() << "\n";
+        std::cout << "  U  = " << U.transpose() << "\n";
+        std::cout << "  u  = " << u.transpose() << "\n";
+        std::cout << "  un = " << un.transpose() << "\n";
+        std::cout << "  field = " << field.transpose() << "\n";
+        std::cout << "  BC = " << BC.transpose() << "\n";
+        std::cout << "  DOF = " << DOF.transpose() << "\n";
+        std::cout << "  EIL_1 = " << EIL_1<< "\n";
+        std::cout << "  EIL_2 = " << EIL_2<< "\n";
+    }
+
 };
+

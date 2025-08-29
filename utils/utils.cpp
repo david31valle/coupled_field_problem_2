@@ -21,7 +21,7 @@ std::vector<std::vector<double>> compute_gp(int NGP, int PD) {
                 GP.push_back(w);
             }
             else if (NGP == 3) {
-                std::vector<double> xi = {-sqrt(0.6), sqrt(0.6)};
+                std::vector<double> xi = {-sqrt(0.6), 0,  sqrt(0.6)};
                 std::vector<double> w = { 5.0/9.0 , 8.0/9.0 , 5.0/9.0};
                 GP.push_back(xi);
                 GP.push_back(w);

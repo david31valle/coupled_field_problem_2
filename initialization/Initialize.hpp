@@ -24,6 +24,8 @@ Initialize(int PD,
            const Eigen::Vector2i &field_dim,
            const std::vector<double> &parameters);
 
+static std::vector<int> find_linear_indices_eq(const Eigen::MatrixXd& M, int value);
+
 
 
 #endif //PROGRAMMING_PROJECT_INITIALIZE_HPP
