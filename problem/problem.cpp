@@ -475,6 +475,7 @@ void problem_coupled::update(const Eigen::VectorXd& dx) {
             int nodeIdx = static_cast<int>(elem.NdL1(i)) - 1; // 1-based -> 0-based
             c(i) = Node_List[nodeIdx].u(0);                  // c is the first entry
         }
+        elem.c = c;
 
 
         const int dim   = PD;
@@ -1036,8 +1037,8 @@ void problem_coupled::solve() {
             // ---------- Residual + Tangent ----------
             assemble(dt);  // fills: Ktot (Sparse), Rtot (Vector)
             double Norm_R0 = 1.0;
-            std::cout<<"Ktot at the end of first assemble"<<std::endl;
-            std::cout<<Eigen::MatrixXd (Ktot).rows() << " x "<< Eigen::MatrixXd (Ktot).cols() <<std::endl;
+//            std::cout<<"Ktot at the end of first assemble"<<std::endl;
+//            std::cout<<Eigen::MatrixXd (Ktot).rows() << " x "<< Eigen::MatrixXd (Ktot).cols() <<std::endl;
 //            Eigen::MatrixXd dense = Eigen::MatrixXd(Ktot);
 //            std::cout<<dense<<std::endl;
 //            std::cout << " column (0):\n"
@@ -1074,40 +1075,40 @@ void problem_coupled::solve() {
                      << " , normalized : 1\n";
             }
 
-            // Ensure column-major + compressed
-            Eigen::SparseMatrix<double> A = Ktot;   // ColMajor by default
-            A.makeCompressed();
-
-// Quick sanity
-            if (A.rows() == 0 || A.cols() == 0) throw std::runtime_error("Empty Ktot");
-            if (A.rows() != A.cols()) throw std::runtime_error("Ktot not square");
-            if (Rtot.size() != A.rows()) throw std::runtime_error("RHS size mismatch");
-
-// Prefer the one-shot API and check info()
-            Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
-            slu.compute(A);
-            if (slu.info() != Eigen::Success) {
-                std::cerr << "SparseLU factorization failed: "
-                          << slu.lastErrorMessage() << "\n";
-                // fall back to diagnostics (see below)
-            }
-            Eigen::VectorXd dx = slu.solve(-Rtot);
-            if (slu.info() != Eigen::Success) {
-                std::cerr << "Solve failed: " << slu.lastErrorMessage() << "\n";
-            }
+//            // Ensure column-major + compressed
+//            Eigen::SparseMatrix<double> A = Ktot;   // ColMajor by default
+//            A.makeCompressed();
+//
+//// Quick sanity
+//            if (A.rows() == 0 || A.cols() == 0) throw std::runtime_error("Empty Ktot");
+//            if (A.rows() != A.cols()) throw std::runtime_error("Ktot not square");
+//            if (Rtot.size() != A.rows()) throw std::runtime_error("RHS size mismatch");
+//
+//// Prefer the one-shot API and check info()
+//            Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
+//            slu.compute(A);
+//            if (slu.info() != Eigen::Success) {
+//                std::cerr << "SparseLU factorization failed: "
+//                          << slu.lastErrorMessage() << "\n";
+//                // fall back to diagnostics (see below)
+//            }
+//            Eigen::VectorXd dx = slu.solve(-Rtot);
+//            if (slu.info() != Eigen::Success) {
+//                std::cerr << "Solve failed: " << slu.lastErrorMessage() << "\n";
+//            }
 
 
 
 //            std::cout<<"second try" <<std::endl;
 //            // Fall back to general sparse LU
-//            auto testing2=Ktot;
-//            auto b2=Rtot;
-//
-//            Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
-//            slu.analyzePattern(testing2);
-//            slu.factorize(testing2);
+            auto testing2=Ktot;
+            auto b2=Rtot;
+
+            Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
+            slu.analyzePattern(testing2);
+            slu.factorize(testing2);
 //            //std::cout<< "solved using slu"<<std::endl;
-//            Eigen::VectorXd  dx = slu.solve(-b2);
+            Eigen::VectorXd  dx = slu.solve(-b2);
 
 
 
@@ -1127,7 +1128,7 @@ void problem_coupled::solve() {
 
 
 
-//            Eigen::VectorXd dx = solve_sparse_linear_system(Ktot, Rtot);
+           // Eigen::VectorXd dx = solve_sparse_linear_system(Ktot, Rtot);
 
 //
 //            std::cout<< "dx" <<std::endl;
