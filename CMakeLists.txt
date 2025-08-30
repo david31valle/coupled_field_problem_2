@@ -26,5 +26,6 @@ add_executable(coupled_field_problem_2
         problem/problem.hpp
         problem/problem.cpp
         problem/problem.cpp
-
+        postprocess/postprocess.hpp
+        postprocess/postprocess.cpp
 )

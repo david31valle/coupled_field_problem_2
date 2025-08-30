@@ -31,7 +31,7 @@ int main() {
         Timer t("Program run");
         // --- Problem setup ---
         int problem_dimension = 1;
-        std::vector<int> element_order = {1, 1};  // {degree_field_1, degree_field_2}
+        std::vector<int> element_order = {2, 1};  // {degree_field_1, degree_field_2}
         Eigen::Vector2i field_dim = {1, problem_dimension};
 
         Eigen::VectorXd Density = readVectorFromFile(

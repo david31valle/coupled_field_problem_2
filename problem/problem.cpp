@@ -3,7 +3,7 @@
 #include <fstream>
 #include <iomanip>
 #include <filesystem>
-
+#include "../postprocess/postprocess.hpp"
 #include <set>
 
 typedef Eigen::SparseMatrix<double> SpMat; // declares a column-major sparse matrix type of double
@@ -992,168 +992,20 @@ static inline Eigen::VectorXd solve_sparse_linear_system(
 
 // ------------ Post Process ------------
 
-namespace {
-
-    // VTK type ids we will emit (no VTK lib needed)
-    constexpr int VTK_LINE                     = 3;
-    constexpr int VTK_TRIANGLE                 = 5;
-    constexpr int VTK_QUAD                     = 9;
-    constexpr int VTK_TETRA                    = 10;
-    constexpr int VTK_HEXAHEDRON               = 12;
-    constexpr int VTK_QUADRATIC_EDGE           = 21;
-    constexpr int VTK_QUADRATIC_TRIANGLE       = 22;
-    constexpr int VTK_QUADRATIC_QUAD           = 23; // 8-noded serendipity
-    constexpr int VTK_QUADRATIC_TETRA          = 24;
-    constexpr int VTK_QUADRATIC_HEXAHEDRON     = 25; // 20-noded serendipity
-    constexpr int VTK_BIQUADRATIC_QUAD         = 28; // full 9-noded
-    constexpr int VTK_TRIQUADRATIC_HEXAHEDRON  = 29; // full 27-noded
-
-// Map (PD, NPE) → VTK cell type (linear elements)
-    inline int vtk_cell_type_from_pd_npe(int PD, int NPE) {
-        // 1D
-        if (PD==1 && NPE==2) return VTK_LINE;
-        if (PD==1 && NPE==3) return VTK_QUADRATIC_EDGE;
-
-        // 2D simplices
-        if (PD==2 && NPE==3) return VTK_TRIANGLE;
-        if (PD==2 && NPE==6) return VTK_QUADRATIC_TRIANGLE;
-
-        // 2D quads
-        if (PD==2 && NPE==4) return VTK_QUAD;
-        if (PD==2 && NPE==8) return VTK_QUADRATIC_QUAD; // serendipity
-        if (PD==2 && NPE==9) return VTK_BIQUADRATIC_QUAD;
-
-        // 3D simplices
-        if (PD==3 && NPE==4)  return VTK_TETRA;
-        if (PD==3 && NPE==10) return VTK_QUADRATIC_TETRA;
-
-        // 3D hexes
-        if (PD==3 && NPE==8)   return VTK_HEXAHEDRON;
-        if (PD==3 && NPE==20)  return VTK_QUADRATIC_HEXAHEDRON;   // serendipity
-        if (PD==3 && NPE==27)  return VTK_TRIQUADRATIC_HEXAHEDRON; // full
-
-        throw std::runtime_error("VTK writer: unsupported (PD,NPE) combination.");
-    }
-
-// Legacy VTK unstructured writer (ASCII)
-static void write_vtk_legacy_unstructured(
-    const std::string& filepath,
-    const std::vector<Node>& NL,
-    const std::vector<element>& EL,
-    int PD,
-    int step, double time
-) {
-    std::filesystem::create_directories(std::filesystem::path(filepath).parent_path());
-    std::ofstream f(filepath);
-    if(!f) throw std::runtime_error("Cannot open VTK file: " + filepath);
-
-    const int nPts = static_cast<int>(NL.size());
-    const int nEl  = static_cast<int>(EL.size());
-    if(nPts == 0 || nEl == 0) throw std::runtime_error("VTK writer: empty mesh.");
-
-    // Infer a uniform cell type from the first element
-    const int NPE = EL[0].NPE1; // we use NdL1 connectivity
-    const int vtk_cell = vtk_cell_type_from_pd_npe(PD, NPE);
-
-    // ---- Header + dataset + FieldData (TIME/CYCLE) ----
-    f << "# vtk DataFile Version 3.1\n";
-    f << "coupled_field_problem output\n";
-    f << "ASCII\n";
-    f << "DATASET UNSTRUCTURED_GRID\n";
-    f << "FIELD FieldData 2\n";
-    f << "TIME 1 1 double\n"  << time << "\n";
-    f << "CYCLE 1 1 int\n"    << step << "\n";
-
-    // ---- POINTS ---- (always 3 components; pad zeros in 1D/2D)
-    f << "POINTS " << nPts << " double\n";
-    f.setf(std::ios::scientific);
-    for (int i = 0; i < nPts; ++i) {
-        const auto& X = NL[i].X;
-        double x = X(0);
-        double y = (PD >= 2 ? X(1) : 0.0);
-        double z = (PD == 3 ? X(2) : 0.0);
-        f << x << " " << y << " " << z << "\n";
-    }
-
-        // ---- CELLS ----
-        long long cellsInts = 0;
-        for (const auto& e : EL) cellsInts += 1 + static_cast<long long>(e.NPE1);
-        f << "CELLS " << nEl << " " << cellsInts << "\n";
-        for (int e = 0; e < nEl; ++e) {
-            const int NPE = EL[e].NPE1;
-            f << NPE;
-            for (int a = 0; a < NPE; ++a) {
-                const int nid0 = static_cast<int>(EL[e].NdL1(a)) - 1; // 1-based → 0-based
-                f << " " << nid0;
-            }
-            f << "\n";
-        }
-
-        // ---- CELL_TYPES ----
-        f << "CELL_TYPES " << nEl << "\n";
-        for (int e = 0; e < nEl; ++e) {
-            const int NPE = EL[e].NPE1;
-            f << vtk_cell_type_from_pd_npe(PD, NPE) << "\n";
-        }
-
-    // ---- POINT_DATA ----
-    f << "POINT_DATA " << nPts << "\n";
-
-    // SCALARS c  (first entry of u)
-    f << "SCALARS c double\nLOOKUP_TABLE default\n";
-    for (int i = 0; i < nPts; ++i) f << NL[i].u(0) << "\n";  // c at u(0) :contentReference[oaicite:1]{index=1}
-
-    // VECTORS v  (u(1..PD); pad to 3 comps)
-    f << "VECTORS v double\n";
-    for (int i = 0; i < nPts; ++i) {
-        double vx = (PD >= 1 ? NL[i].u(1) : 0.0);
-        double vy = (PD >= 2 ? NL[i].u(2) : 0.0);
-        double vz = (PD == 3 ? NL[i].u(3) : 0.0);
-        f << vx << " " << vy << " " << vz << "\n";          // v at u(1..PD) :contentReference[oaicite:2]{index=2}
-    }
-
-    // Optional: SCALARS p  (after c and v, if present as in calculate_max_min_difference)
-    // p index = 1 + PD
-    if (!NL.empty()) {
-        const Eigen::Index needLen = 2 + PD; // at least c + v(PD) + p
-        if (NL[0].u.size() >= needLen) {
-            f << "SCALARS p double\nLOOKUP_TABLE default\n";
-            for (int i = 0; i < nPts; ++i) f << NL[i].u(1 + PD) << "\n"; // p at u(1+PD) :contentReference[oaicite:3]{index=3}
-        }
-    }
-
-    // Optional: Gauss-point values attached to nodes (if you want to visualize them)
-    // We write each GP component as a separate scalar array: GP_0, GP_1, ...
-    if (!NL.empty() && NL[0].GP_vals.size() > 0) {
-        const int ngp = static_cast<int>(NL[0].GP_vals.size());
-        for (int s = 0; s < ngp; ++s) {
-            f << "SCALARS GP_" << s << " double\nLOOKUP_TABLE default\n";
-            for (int i = 0; i < nPts; ++i) {
-                double val = (NL[i].GP_vals.size() == ngp ? NL[i].GP_vals(s) : 0.0);
-                f << val << "\n";
-            }
-        }
-    }
-}
-
-} // end anonymous namespace
-
 void problem_coupled::post_process() {
     // Minimal stub so you can compile/run. Hook your 1D/2D/3D exporters here.
     // e.g., write nodal c and v to file if you want.
     // Build "vtk/step_XXXX.vtk" (ParaView will group the series automatically)
     std::filesystem::create_directories("vtk");
-    std::ostringstream oss;
-    oss << "vtk/step_" << std::setfill('0') << std::setw(4) << counter << ".vtk";
-    try {
-        // Write using current state (Node_List, Element_List), PD, step counter, and time t
-        write_vtk_legacy_unstructured(oss.str(), Node_List, Element_List, PD, counter, t);
-        // Optional: also log for your text report file
-        std::ofstream file(filename, std::ios::app);
-        file << "VTK written: " << oss.str() << "  (t=" << t << ", step=" << counter << ")\n";
-    } catch(const std::exception& e) {
-        std::cerr << "[post_process] VTK error: " << e.what() << "\n";
-    }
+    char fn[64]; std::snprintf(fn, sizeof(fn), "vtk/step_%04d.vtk", counter);
+
+    vtkpp::Options opt;
+    opt.add_vertex_cells = true;
+    vtkpp::write_step_vtk(fn, Node_List, Element_List, PD, counter, t, opt);
+
+    static vtkpp::PvdSeries series("vtk/series.pvd");
+    series.add(t, std::string(fn).substr(4));
+    // call series.close() once when your run ends (e.g., in a finalize() or destructor)
 }
 
 void problem_coupled::output_step_info() {
