@@ -31,11 +31,11 @@ int main() {
         Timer t("Program run");
         // --- Problem setup ---
         int problem_dimension = 2;
-        std::vector<int> element_order = {2, 1};  // {degree_field_1, degree_field_2}
+        std::vector<int> element_order = {1, 1};  // {degree_field_1, degree_field_2}
         Eigen::Vector2i field_dim = {1, problem_dimension};
 
         Eigen::VectorXd Density = readVectorFromFile(
-                "C:\\Users\\drva_\\CLionProjects\\coupled_field_problem_2\\data.txt");
+                "D:\\Maitreya_Docs\\Education\\MS_in_Deutschland\\FAU-Erlangen\\Comp_Eng\\Studies\\3_WiSe_2024-25\\FEM Project\\Coupled-FEM-2\\data.txt");
         Eigen::VectorXd Velocity = Density;
 
         int domain_size = 1;
