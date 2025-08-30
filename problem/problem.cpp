@@ -10,6 +10,19 @@
 
 typedef Eigen::SparseMatrix<double> SpMat; // declares a column-major sparse matrix type of double
 
+
+
+template<typename T>
+void printVector(const std::vector<T>& vec, const std::string& name) {
+    std::cout << name << " (size = " << vec.size() << "): ";
+    for (size_t i = 0; i < vec.size(); ++i) {
+        std::cout << vec[i];
+        if (i + 1 < vec.size()) std::cout << ", ";
+    }
+    std::cout << "\n";
+}
+
+
 problem_coupled::problem_coupled(
         int PD,
         std::vector<Node>& NL,
@@ -149,102 +162,143 @@ void problem_coupled::Assign_BC(const std::string Corners) {
     }
 
     else if (PD == 3) {
+        // minus/plus edges (X, Y, Z) and minus/plus faces (X, Y, Z)
         std::vector<int> MEX, PEX, MEY, PEY, MEZ, PEZ;
         std::vector<int> MFX, PFX, MFY, PFY, MFZ, PFZ;
 
+        auto on = [&](double a, double b) { return std::abs(a - b) < tol; };
+
         for (int i = 0; i < NoNs; ++i) {
-            const auto& X = Node_List[i].X;
-            double x = X(0), y = X(1), z = X(2);
+            const auto& Xv = Node_List[i].X;      // Xv(0)=x, Xv(1)=y, Xv(2)=z
+            const double x = Xv(0), y = Xv(1), z = Xv(2);
 
-            bool onX0 = std::abs(x - 0.0) < tol;
-            bool onXW = std::abs(x - W) < tol;
-            bool onY0 = std::abs(y - 0.0) < tol;
-            bool onYH = std::abs(y - H) < tol;
-            bool onZ0 = std::abs(z - 0.0) < tol;
-            bool onZD = std::abs(z - D) < tol;
-
-            if ((onX0 && onY0 && onZ0) || (onX0 && onY0 && onZD) ||
-                (onX0 && onYH && onZ0) || (onX0 && onYH && onZD) ||
-                (onXW && onY0 && onZ0) || (onXW && onY0 && onZD) ||
-                (onXW && onYH && onZ0) || (onXW && onYH && onZD)) {
+            // corner nodes
+            if ( (on(x,0) && on(y,0) && on(z,0)) || (on(x,0) && on(y,0) && on(z,D)) ||
+                 (on(x,0) && on(y,H) && on(z,0)) || (on(x,0) && on(y,H) && on(z,D)) ||
+                 (on(x,W) && on(y,0) && on(z,0)) || (on(x,W) && on(y,0) && on(z,D)) ||
+                 (on(x,W) && on(y,H) && on(z,0)) || (on(x,W) && on(y,H) && on(z,D)) ) {
                 NLC.push_back(i);
-            } else if (onX0 && onY0) {
-                MEZ.push_back(i);
-            } else if (onX0 && onYH) {
-                PEZ.push_back(i);
-            } else if (onX0 && onZ0) {
-                MEY.push_back(i);
-            } else if (onX0 && onZD) {
-                PEY.push_back(i);
-            } else if (onY0 && onXW) {
-                PEZ.push_back(i);
-            } else if (onY0 && onZ0) {
-                MEX.push_back(i);
-            } else if (onY0 && onZD) {
-                PEX.push_back(i);
-            } else if (onX0) {
-                MFX.push_back(i);
-            } else if (onXW) {
-                PFX.push_back(i);
-            } else if (onY0) {
-                MFY.push_back(i);
-            } else if (onYH) {
-                PFY.push_back(i);
-            } else if (onZ0) {
-                MFZ.push_back(i);
-            } else if (onZD) {
-                PFZ.push_back(i);
-            } else {
+            }
+                // X = 0 plane (minus X)
+            else if (on(x,0)) {
+                if      (on(y,0)) { MEZ.push_back(i); }     // edge: X=0, Y=0  (vary z)
+                else if (on(y,H)) { PEZ.push_back(i); }     // edge: X=0, Y=H
+                else if (on(z,0)) { MEY.push_back(i); }     // edge: X=0, Z=0  (vary y)
+                else if (on(z,D)) { PEY.push_back(i); }     // edge: X=0, Z=D
+                else              { MFX.push_back(i); }     // face interior: X=0
+            }
+                // Y = 0 plane (minus Y)
+            else if (on(y,0)) {
+                if      (on(x,W)) { PEZ.push_back(i); }     // edge: X=W, Y=0
+                else if (on(z,0)) { MEX.push_back(i); }     // edge: Y=0, Z=0  (vary x)
+                else if (on(z,D)) { PEX.push_back(i); }     // edge: Y=0, Z=D
+                else              { MFY.push_back(i); }     // face interior: Y=0
+            }
+                // Z = 0 plane (minus Z)
+            else if (on(z,0)) {
+                if      (on(x,W)) { PEY.push_back(i); }     // edge: X=W, Z=0
+                else if (on(y,H)) { PEX.push_back(i); }     // edge: Y=H, Z=0
+                else              { MFZ.push_back(i); }     // face interior: Z=0
+            }
+                // X = W plane (plus X)
+            else if (on(x,W)) {
+                if      (on(y,H)) { PEZ.push_back(i); }     // edge: X=W, Y=H
+                else if (on(z,D)) { PEY.push_back(i); }     // edge: X=W, Z=D
+                else              { PFX.push_back(i); }     // face interior: X=W
+            }
+                // Y = H plane (plus Y)
+            else if (on(y,H)) {
+                if      (on(z,D)) { PEX.push_back(i); }     // edge: Y=H, Z=D
+                else              { PFY.push_back(i); }     // face interior: Y=H
+            }
+                // Z = D plane (plus Z)
+            else if (on(z,D)) {
+                PFZ.push_back(i);                           // face interior: Z=D
+            }
+                // interior "star" nodes
+            else {
                 NLS.push_back(i);
             }
         }
 
-        // Match each pair of periodic faces
-        auto match_nodes = [&](const std::vector<int>& plus, const std::vector<int>& minus, int comp) {
-            for (int pi : plus) {
-                for (int mi : minus) {
-                    if (std::abs(Node_List[pi].X(comp) - Node_List[mi].X(comp)) < tol) {
-                        NLP.push_back(pi);
-                        NLM.push_back(mi);
-                    }
+        // Now build periodic pairs (NLM, NLP) exactly like MATLAB
+
+        // X-direction edges: compare x only
+        for (int pi : PEX) {
+            for (int mi : MEX) {
+                if (on(Node_List[pi].X(0), Node_List[mi].X(0))) {
+                    NLM.push_back(mi);
+                    NLP.push_back(pi);
                 }
             }
-        };
+        }
 
-        match_nodes(PEX, MEX, 0);
-        match_nodes(PEY, MEY, 1);
-        match_nodes(PEZ, MEZ, 2);
+        // Y-direction edges: compare y only
+        for (int pi : PEY) {
+            for (int mi : MEY) {
+                if (on(Node_List[pi].X(1), Node_List[mi].X(1))) {
+                    NLM.push_back(mi);
+                    NLP.push_back(pi);
+                }
+            }
+        }
 
+        // Z-direction edges: compare z only
+        for (int pi : PEZ) {
+            for (int mi : MEZ) {
+                if (on(Node_List[pi].X(2), Node_List[mi].X(2))) {
+                    NLM.push_back(mi);
+                    NLP.push_back(pi);
+                }
+            }
+        }
+
+        // X-faces (X = W vs X = 0): match (y,z)
         for (int pi : PFX) {
             for (int mi : MFX) {
-                if (std::abs(Node_List[pi].X(1) - Node_List[mi].X(1)) < tol &&
-                    std::abs(Node_List[pi].X(2) - Node_List[mi].X(2)) < tol) {
-                    NLP.push_back(pi);
+                if (on(Node_List[pi].X(1), Node_List[mi].X(1)) &&
+                    on(Node_List[pi].X(2), Node_List[mi].X(2))) {
                     NLM.push_back(mi);
+                    NLP.push_back(pi);
                 }
             }
         }
 
+        // Y-faces (Y = H vs Y = 0): match (x,z)
         for (int pi : PFY) {
             for (int mi : MFY) {
-                if (std::abs(Node_List[pi].X(0) - Node_List[mi].X(0)) < tol &&
-                    std::abs(Node_List[pi].X(2) - Node_List[mi].X(2)) < tol) {
-                    NLP.push_back(pi);
+                if (on(Node_List[pi].X(0), Node_List[mi].X(0)) &&
+                    on(Node_List[pi].X(2), Node_List[mi].X(2))) {
                     NLM.push_back(mi);
+                    NLP.push_back(pi);
                 }
             }
         }
 
+        // Z-faces (Z = D vs Z = 0): match (x,y)
         for (int pi : PFZ) {
             for (int mi : MFZ) {
-                if (std::abs(Node_List[pi].X(0) - Node_List[mi].X(0)) < tol &&
-                    std::abs(Node_List[pi].X(1) - Node_List[mi].X(1)) < tol) {
-                    NLP.push_back(pi);
+                if (on(Node_List[pi].X(0), Node_List[mi].X(0)) &&
+                    on(Node_List[pi].X(1), Node_List[mi].X(1))) {
                     NLM.push_back(mi);
+                    NLP.push_back(pi);
                 }
             }
         }
+
+        // (Optional but helpful) quick consistency check while debugging:
+
     }
+
+    std::cout << "NLC=" << NLC.size()
+              << " NLS=" << NLS.size()
+              << " NLM=" << NLM.size()
+              << " NLP=" << NLP.size() << std::endl;
+
+    printVector(NLC, "NLC");
+    printVector(NLS, "NLS");
+    printVector(NLM, "NLM");
+    printVector(NLP, "NLP");
 
     // === Assign values for corner and periodic nodes ===
 
@@ -389,8 +443,7 @@ void problem_coupled::update(const Eigen::VectorXd& dx) {
     int NoNs = Node_List.size();
     int NoEs = Element_List.size();
     int PD   = this->PD;
-//    std::cout<<"dx" << std::endl;
-//    std::cout<<dx<<std::endl;
+
     // === Update node unknowns u based on DOFs and dx ===
     for (int i = 0; i < NoNs; ++i) {
         Eigen::VectorXd& BC  = Node_List[i].BC;
@@ -405,8 +458,7 @@ void problem_coupled::update(const Eigen::VectorXd& dx) {
                 }
             }
         }
-//        std::cout<<'u' <<std::endl;
-//        std::cout<<u<<std::endl;
+
         Node_List[i].u = u;
     }
 
@@ -423,12 +475,8 @@ void problem_coupled::update(const Eigen::VectorXd& dx) {
             int nodeIdx = static_cast<int>(elem.NdL1(i)) - 1; // 1-based -> 0-based
             c(i) = Node_List[nodeIdx].u(0);                  // c is the first entry
         }
-//        std::cout<<'c' <<std::endl;
-//        std::cout<<c<<std::endl;
-        elem.c = c;
 
-        // === Vector field v (use MATLAB first/last) ===
-        // MATLAB: dim = PD; first = last + 1; last = last + dim, with c: first=1,last=1
+
         const int dim   = PD;
         int last0  = 0;          // after c at index 0 in C++
         int first0 = last0 + 1;  // v starts right after c -> index 1
@@ -439,43 +487,11 @@ void problem_coupled::update(const Eigen::VectorXd& dx) {
             int nodeIdx = static_cast<int>(elem.NdL2(i)) - 1; // 1-based -> 0-based
             v.col(i) = Node_List[nodeIdx].u.segment(first0, dim); // u(first0 : first0+PD-1)
         }
-//        std::cout<<'v' <<std::endl;
-//        std::cout<<v<<std::endl;
+
         elem.v = v;
 
     }
 
-
-    // === Update element field values from updated nodal u ===
-//    for (int e = 0; e < NoEs; ++e) {
-//        auto& elem = Element_List[e];
-//
-//        int NPE1 = elem.NPE1;
-//        int NPE2 = elem.NPE2;
-//
-//        // === Scalar field c (dimension ) ===
-//// === Scalar field c (Vector of length NPE1) ===
-//        Eigen::VectorXd c(NPE1);
-//        for (int i = 0; i < NPE1; ++i) {
-//            int nodeIdx = static_cast<int>(elem.NdL1(i)) - 1; // 1-based -> 0-based
-//            // scalar field is the first entry in Node.u
-//            c(i) = Node_List[nodeIdx].u(0);
-//        }
-//        elem.c = c;  // OK: VectorXd -> VectorXd
-//
-//
-//        // === Vector field v (dimension PD) ===
-//        const int dim   = PD;
-//        const int first = last + 1;   // 1-based
-//        last += dim;
-//
-//        Eigen::MatrixXd v(PD, NPE2);
-//        for (int i = 0; i < NPE2; ++i) {
-//            int nodeIdx = static_cast<int>(elem.NdL2(i)) - 1;      // 1-based -> 0-based
-//            v.col(i) = Node_List[nodeIdx].u.segment(first - 1, dim); // u(first:last)
-//        }
-//        elem.v = v;
-//    }
 }
 
 void problem_coupled::update_GP(const Eigen::VectorXd& dx_gp) {
@@ -1020,8 +1036,8 @@ void problem_coupled::solve() {
             // ---------- Residual + Tangent ----------
             assemble(dt);  // fills: Ktot (Sparse), Rtot (Vector)
             double Norm_R0 = 1.0;
-//            std::cout<<"Ktot at the end of first assemble"<<std::endl;
-//            std::cout<<Eigen::MatrixXd (Ktot).rows() << " x "<< Eigen::MatrixXd (Ktot).cols() <<std::endl;
+            std::cout<<"Ktot at the end of first assemble"<<std::endl;
+            std::cout<<Eigen::MatrixXd (Ktot).rows() << " x "<< Eigen::MatrixXd (Ktot).cols() <<std::endl;
 //            Eigen::MatrixXd dense = Eigen::MatrixXd(Ktot);
 //            std::cout<<dense<<std::endl;
 //            std::cout << " column (0):\n"
@@ -1038,12 +1054,16 @@ void problem_coupled::solve() {
             if (error_counter == 1) {
                 if (counter == 1 && GP_vals == "On") {
                     assemble_GP(dt);
-                    Eigen::VectorXd dx_GP = solve_sparse_linear_system(Ktot_GP, Rtot_GP);
+                    auto testing_GP=Ktot_GP;
+                    auto b_GP=Rtot_GP;
+
+                    Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
+                    slu.analyzePattern(testing_GP);
+                    slu.factorize(testing_GP);
+                    Eigen::VectorXd  dx_GP = slu.solve(-b_GP);
                     update_GP(dx_GP);
                 }
 
-                // initial PostProcess (optional; mirrors MATLAB)
-               //post_process();
 
                 double Norm_R0 = Rtot.norm();
                 std::cout << "Residual Norm at Predictor               : "
@@ -1054,29 +1074,43 @@ void problem_coupled::solve() {
                      << " , normalized : 1\n";
             }
 
-            // ---------- Solve & update (Corrector) ----------
-            // MATLAB has: dx = -K \ R
-            // We solve K y = R then take dx = -y
-//            auto testing=Ktot;
-//            auto b=Rtot;
-//            std::cout<<"Frist try"<< "\n";
-//            Eigen::SimplicialCholesky<SpMat> chol(testing);  // performs a Cholesky factorization of A
-//            Eigen::VectorXd x = chol.solve(b);
-//            std::cout<<"x"<<std::endl;
-//            std::cout <<x<<std::endl;
-//
+            // Ensure column-major + compressed
+            Eigen::SparseMatrix<double> A = Ktot;   // ColMajor by default
+            A.makeCompressed();
 
+// Quick sanity
+            if (A.rows() == 0 || A.cols() == 0) throw std::runtime_error("Empty Ktot");
+            if (A.rows() != A.cols()) throw std::runtime_error("Ktot not square");
+            if (Rtot.size() != A.rows()) throw std::runtime_error("RHS size mismatch");
 
-            std::cout<<"second try" <<std::endl;
-            // Fall back to general sparse LU
-            auto testing2=Ktot;
-            auto b2=Rtot;
-
+// Prefer the one-shot API and check info()
             Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
-            slu.analyzePattern(testing2);
-            slu.factorize(testing2);
-            //std::cout<< "solved using slu"<<std::endl;
-            Eigen::VectorXd  dx = slu.solve(-b2);
+            slu.compute(A);
+            if (slu.info() != Eigen::Success) {
+                std::cerr << "SparseLU factorization failed: "
+                          << slu.lastErrorMessage() << "\n";
+                // fall back to diagnostics (see below)
+            }
+            Eigen::VectorXd dx = slu.solve(-Rtot);
+            if (slu.info() != Eigen::Success) {
+                std::cerr << "Solve failed: " << slu.lastErrorMessage() << "\n";
+            }
+
+
+
+//            std::cout<<"second try" <<std::endl;
+//            // Fall back to general sparse LU
+//            auto testing2=Ktot;
+//            auto b2=Rtot;
+//
+//            Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
+//            slu.analyzePattern(testing2);
+//            slu.factorize(testing2);
+//            //std::cout<< "solved using slu"<<std::endl;
+//            Eigen::VectorXd  dx = slu.solve(-b2);
+
+
+
 //            std::cout<<"dx"<<std::endl;
 //            std::cout <<dx<<std::endl;
 
@@ -1159,7 +1193,13 @@ void problem_coupled::solve() {
 
             if (GP_vals == "On") {
                 assemble_GP(dt);
-                Eigen::VectorXd dx_GP = solve_sparse_linear_system(Ktot_GP, Rtot_GP);
+                auto testing_GP=Ktot_GP;
+                auto b_GP=Rtot_GP;
+
+                Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
+                slu.analyzePattern(testing_GP);
+                slu.factorize(testing_GP);
+                Eigen::VectorXd  dx_GP = slu.solve(-b_GP);
                 update_GP(dx_GP);
             }
 
@@ -1186,4 +1226,3 @@ void problem_coupled::solve() {
         file.close();
     } // while t < T
 }
-

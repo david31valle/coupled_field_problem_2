@@ -30,7 +30,7 @@ int main() {
     {
         Timer t("Program run");
         // --- Problem setup ---
-        int problem_dimension = 1;
+        int problem_dimension = 3;
         std::vector<int> element_order = {2, 1};  // {degree_field_1, degree_field_2}
         Eigen::Vector2i field_dim = {1, problem_dimension};
 
@@ -59,7 +59,7 @@ int main() {
         double tol = 1e-9;
         std::string boundary_condition = "PBC";
         std::string corners = "Free";
-        std::string GP_vals = "On";
+        std::string GP_vals = "Off";
         std::string plot_mesh = "Off";
 
         auto [nl, element_lists] = generate_mesh(/*PD=*/0, domain_size, partition,
