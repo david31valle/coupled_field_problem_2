@@ -2,13 +2,12 @@
 #include "problem.hpp"
 
 
-#include "problem.hpp"
+
 #include <fstream>
 #include <iomanip>
 
 #include <set>
 
-typedef Eigen::SparseMatrix<double> SpMat; // declares a column-major sparse matrix type of double
 
 class Timer {
 public:
@@ -1004,61 +1003,84 @@ Eigen::MatrixXd problem_coupled::Get_all_velocity() {
 #include <iostream>
 
 void problem_coupled::problem_info() {
+    using namespace std;
+    namespace fs = std::filesystem;
+
+    if (filename.empty()) {
+        throw std::runtime_error("filename está vacío");
+    }
+
+    // Info a consola como ya haces
     int NoEs = Element_List.size();
     int NoNs = Node_List.size();
+    cout << "======================================================" << endl;
+    cout << "================  Problem information  ===============" << endl;
+    cout << "======================================================" << endl;
+    cout << "Problem dimension                   : " << PD << endl;
+    cout << "Time increment                      : " << dt << endl;
+    cout << "Final time                          : " << T << endl;
+    cout << "Time increment method               : " << time_incr_method << endl;
+    cout << "Number of nodes                     : " << NoNs << endl;
+    cout << "Number of bulk elements             : " << NoEs << endl;
+    cout << "Number of DOFs                      : " << DOFs << endl;
 
-    std::cout << "======================================================" << std::endl;
-    std::cout << "================  Problem information  ===============" << std::endl;
-    std::cout << "======================================================" << std::endl;
-    std::cout << "Problem dimension                   : " << PD << std::endl;
-    std::cout << "Time increment                      : " << dt << std::endl;
-    std::cout << "Final time                          : " << T << std::endl;
-    std::cout << "Time increment method               : " << time_incr_method << std::endl;
-    std::cout << "Number of nodes                     : " << NoNs << std::endl;
-    std::cout << "Number of bulk elements             : " << NoEs << std::endl;
-    std::cout << "Number of DOFs                      : " << DOFs << std::endl;
-
-    std::cout << "Element order                       : [";
+    cout << "Element order                       : [";
     for (size_t i = 0; i < element_order.size(); ++i) {
-        std::cout << element_order[i];
-        if (i != element_order.size() - 1) std::cout << " ";
+        cout << element_order[i] << (i + 1 < element_order.size() ? " " : "");
     }
-    std::cout << "]" << std::endl;
+    cout << "]" << endl;
 
-    std::cout << "E  R  xi                            : [";
+    cout << "E  R  xi                            : [";
     for (size_t i = 0; i < parameters.size(); ++i) {
-        std::cout << parameters[i];
-        if (i != parameters.size() - 1) std::cout << " ";
+        cout << parameters[i] << (i + 1 < parameters.size() ? " " : "");
     }
-    std::cout << "]" << std::endl;
-    std::cout << "======================================================" << std::endl;
+    cout << "]" << endl;
+    cout << "======================================================" << endl;
 
-    std::ofstream file(filename);
-    file << "======================================================\n";
-    file << "================  Problem information  ===============\n";
-    file << "======================================================\n";
-    file << "Problem dimension                   : " << PD << "\n";
-    file << "Time increment                      : " << dt << "\n";
-    file << "Final time                          : " << T << "\n";
-    file << "Time increment method               : " << time_incr_method << "\n";
-    file << "Number of nodes                     : " << NoNs << "\n";
-    file << "Number of bulk elements             : " << NoEs << "\n";
-    file << "Number of DOFs                      : " << DOFs << "\n";
+    // Resolución de ruta y creación de carpeta si hace falta
+    fs::path outPath(filename);
+    if (outPath.has_parent_path()) {
+        std::error_code ec;
+        fs::create_directories(outPath.parent_path(), ec); // no lanza, revisa ec si quieres
+        if (ec) {
+            throw std::runtime_error("No se pudo crear el directorio: " + outPath.parent_path().string());
+        }
+    }
 
-    file << "Element order                       : ";
-    for (int val : element_order)
-        file << val << " ";
-    file << "\n";
+    // Útil para entender rutas relativas
+    cerr << "Working directory: " << fs::current_path().string() << "\n";
+    cerr << "Escribiré en     : " << fs::absolute(outPath).string() << "\n";
 
-    file << "E  R  xi                            : ";
-    for (double val : parameters)
-        file << val << " ";
-    file << "\n";
+    // Abre con excepciones activadas para detectar fallos reales
+    std::ofstream file;
+    file.exceptions(std::ofstream::failbit | std::ofstream::badbit);
+    try {
+        file.open(outPath, std::ios::out | std::ios::trunc); // crea si no existe
+        file << "======================================================\n";
+        file << "================  Problem information  ===============\n";
+        file << "======================================================\n";
+        file << "Problem dimension                   : " << PD << "\n";
+        file << "Time increment                      : " << dt << "\n";
+        file << "Final time                          : " << T << "\n";
+        file << "Time increment method               : " << time_incr_method << "\n";
+        file << "Number of nodes                     : " << NoNs << "\n";
+        file << "Number of bulk elements             : " << NoEs << "\n";
+        file << "Number of DOFs                      : " << DOFs << "\n";
 
-    file << "======================================================\n\n\n";
-    file.close();
+        file << "Element order                       : ";
+        for (int v : element_order) file << v << " ";
+        file << "\n";
+
+        file << "E  R  xi                            : ";
+        for (double v : parameters) file << v << " ";
+        file << "\n";
+
+        file << "======================================================\n\n\n";
+        file.close();
+    } catch (const std::ios_base::failure& e) {
+        throw std::runtime_error(std::string("Falló la escritura en '") + outPath.string() + "': " + e.what());
+    }
 }
-
 std::pair<double, double> problem_coupled::calculate_max_min_difference() {
     int NoNs = Node_List.size();
     int PD = this->PD;
@@ -1105,6 +1127,9 @@ void problem_coupled::post_process() {
 }
 
 void problem_coupled::output_step_info() {
+    std::cout << "\nStep number: " << counter
+         << ",   Time increment: " << dt
+         << ",   Current time: " << t << "\n\n";
     std::ofstream file(filename, std::ios::app);
     file << "\nStep number: " << counter
          << ",   Time increment: " << dt

@@ -16,6 +16,10 @@
 #include "../Eigen/SparseLU"
 #include "../Eigen/IterativeLinearSolvers"
 #include <limits>
+#include <filesystem>
+#include <iostream>
+#include <stdexcept>
+
 
 
 class problem_coupled {

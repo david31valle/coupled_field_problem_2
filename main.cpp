@@ -6,6 +6,7 @@
 #include "preprocess/mesh.hpp"
 #include "initialization/initialize.hpp"
 #include "utils/utils.hpp"
+#include "utils/Config.hpp"
 #include "problem/problem.hpp"
 #include <chrono>
 
@@ -26,59 +27,47 @@ private:
     std::chrono::high_resolution_clock::time_point start;
 };
 
-int main() {
-    {
-        Timer t("Program run");
-        // --- Problem setup ---
-        int problem_dimension = 2;
-        std::vector<int> element_order = {1, 1};  // {degree_field_1, degree_field_2}
-        Eigen::Vector2i field_dim = {1, problem_dimension};
+int main(int argc, char** argv) {
+    Timer t("Program run");
+    std::string cfgPath = "config.ini";
+    for (int i=1; i<argc; ++i) {
+        std::string a(argv[i]);
+        if (a.rfind("--config=", 0) == 0) { cfgPath = a.substr(9); }
+    }
 
-        Eigen::VectorXd Density = readVectorFromFile(
-                "D:\\Maitreya_Docs\\Education\\MS_in_Deutschland\\FAU-Erlangen\\Comp_Eng\\Studies\\3_WiSe_2024-25\\FEM Project\\Coupled-FEM-2\\data.txt");
+    try {
+        Config cfg = Config::from_ini_required(cfgPath);    // <-- mandatory
+        cfg = Config::override_from_argv(argc, argv, std::move(cfg));
+
+        // --- unchanged below, just wire cfg into your existing calls ---
+        Eigen::VectorXd Density  = readVectorFromFile(cfg.density_path);
         Eigen::VectorXd Velocity = Density;
 
-        int domain_size = 1;
-        int partition = 5;
+        auto [nl, element_lists] = generate_mesh(
+                /*PD=*/0, cfg.domain_size, cfg.partition, cfg.element_order, cfg.problem_dimension);
 
-        // (Other simulation parameters can go here, if needed)
-        std::string initial_density = "Two-Bubble";
-        double initial_cell_density = 1.0;
-        double cell_density_perturbation = 0.5;
-        double young_modulus = 1.0;
-        double cell_radius = 1.0;
-        double friction_coefficient = 10.0;
+        Eigen::Vector2i field_dim(1, cfg.problem_dimension);
 
-        std::vector<double> parameters = {young_modulus, cell_radius, friction_coefficient};
+        auto [NL, EL] = Initialize(cfg.problem_dimension, nl,
+                                   element_lists[0], element_lists[1],
+                                   cfg.domain_size,
+                                   cfg.initial_cell_density, cfg.cell_density_perturbation,
+                                   Density, Velocity, cfg.initial_density,
+                                   cfg.element_order, field_dim, cfg.parameters());
 
-        double T = 1e4;
-        double dt = 0.02;
-        std::string time_increment = "Adaptive";
-        double time_factor = 2.0;
-        int max_iter = 10;
-        double tol = 1e-9;
-        std::string boundary_condition = "PBC";
-        std::string corners = "Free";
-        std::string GP_vals = "Off";
-        std::string plot_mesh = "Off";
+        problem_coupled coupled_problem(cfg.problem_dimension, NL, EL, cfg.domain_size,
+                                        cfg.boundary_condition, cfg.corners,
+                                        cfg.initial_density, cfg.parameters(),
+                                        cfg.element_order, field_dim,
+                                        cfg.GP_vals, cfg.time_increment,
+                                        cfg.T, cfg.dt, cfg.time_factor, cfg.max_iter, cfg.tol);
 
-        auto [nl, element_lists] = generate_mesh(/*PD=*/0, domain_size, partition,
-                                                        element_order, problem_dimension);
-//    std::cout<<"nl"<<std::endl;
-//    std::cout<<nl<<std::endl;
-//    std::cout<<"el"<<std::endl;
-//    std::cout<<element_lists[1] <<std::endl;
-
-        auto [NL, EL] = Initialize(problem_dimension, nl, element_lists[0], element_lists[1], domain_size,
-                                   initial_cell_density, cell_density_perturbation, Density, Velocity, initial_density,
-                                   element_order, field_dim, parameters);
-//    EL[0].disp();
-//    EL[2].disp();
-//    EL[4].disp();
-        problem_coupled coupled_problem(problem_dimension, NL, EL, domain_size, boundary_condition, corners,
-                                        initial_density, parameters, element_order, field_dim, GP_vals, time_increment,
-                                        T, dt, time_factor, max_iter, tol);
+    } catch (const std::exception& e) {
+        std::cerr << "[Configuration error] " << e.what() << "\n"
+                  << "Tip: pass a specific file with --config=path/to/config.ini\n";
+        return EXIT_FAILURE;
     }
+
     return 0;
 }
 
