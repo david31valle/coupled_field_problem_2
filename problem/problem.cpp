@@ -1083,9 +1083,25 @@ std::pair<double, double> problem_coupled::calculate_max_min_difference() {
 }
 
 
+// ------------ Post Process ------------
+
+#include "../postprocess/postprocess.hpp"
+#include <filesystem>
+
 void problem_coupled::post_process() {
     // Minimal stub so you can compile/run. Hook your 1D/2D/3D exporters here.
     // e.g., write nodal c and v to file if you want.
+    // Build "vtk/step_XXXX.vtk" (ParaView will group the series automatically)
+    std::filesystem::create_directories("vtk");
+    char fn[64]; std::snprintf(fn, sizeof(fn), "vtk/step_%04d.vtk", counter);
+
+    vtkpp::Options opt;
+    opt.add_vertex_cells = true;
+    vtkpp::write_step_vtk(fn, Node_List, Element_List, PD, counter, t, opt);
+
+    static vtkpp::PvdSeries series("vtk/series.pvd");
+    series.add(t, std::string(fn).substr(4));
+    // call series.close() once when your run ends (e.g., in a finalize() or destructor)
 }
 
 void problem_coupled::output_step_info() {
