@@ -10,16 +10,138 @@
 
 typedef Eigen::SparseMatrix<double> SpMat; // declares a column-major sparse matrix type of double
 
+class Timer {
+public:
+    Timer(const std::string& name = "Timer")
+            : name(name), start(std::chrono::high_resolution_clock::now()) {}
 
-
-template<typename T>
-void printVector(const std::vector<T>& vec, const std::string& name) {
-    std::cout << name << " (size = " << vec.size() << "): ";
-    for (size_t i = 0; i < vec.size(); ++i) {
-        std::cout << vec[i];
-        if (i + 1 < vec.size()) std::cout << ", ";
+    ~Timer() {
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration =
+                std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        std::cout << name << " took " << duration << " ms\n";
     }
-    std::cout << "\n";
+
+
+
+private:
+    std::string name;
+    std::chrono::high_resolution_clock::time_point start;
+};
+
+struct MatrixHealth {
+    int rows = 0, cols = 0;
+    Eigen::Index nnz = 0;
+    int zero_rows = 0, zero_cols = 0;
+    Eigen::Index nonfinite = 0;
+    int zero_diagonal = 0;
+    int inconsistent_zero_rows = 0;    // zero row but R(i) != 0
+    double rel_asym = std::numeric_limits<double>::quiet_NaN(); // only if expectSym
+    double ones_resid = std::numeric_limits<double>::quiet_NaN(); // ||K*1||
+    bool ok = false;
+};
+
+inline MatrixHealth check_matrix_health(const Eigen::SparseMatrix<double>& Ktot,
+                                        const Eigen::VectorXd* Rtot = nullptr,
+                                        bool expectSym = false,
+                                        double tol = 1e-12,
+                                        int print_limit = 10,
+                                        bool verbose=false)
+{
+    //Timer t("Matrix health");
+
+    MatrixHealth H;
+    Eigen::SparseMatrix<double> A = Ktot;
+    if (!A.isCompressed()) A.makeCompressed();
+
+    H.rows = A.rows();
+    H.cols = A.cols();
+    H.nnz  = A.nonZeros();
+
+    std::vector<int> row_nnz(H.rows, 0), col_nnz(H.cols, 0);
+
+    // scan entries for counts and nonfinite
+    for (int k = 0; k < A.outerSize(); ++k) {
+        for (Eigen::SparseMatrix<double>::InnerIterator it(A, k); it; ++it) {
+            const int i = it.row();
+            const int j = it.col();
+            const double v = it.value();
+            row_nnz[i]++; col_nnz[j]++;
+            if (!std::isfinite(v)) {
+                ++H.nonfinite;
+                if (H.nonfinite <= print_limit && verbose)
+                    std::cerr << "nonfinite at (" << i << "," << j << ") = " << v << "\n";
+            }
+        }
+    }
+
+    // zero rows and columns
+    for (int i = 0; i < H.rows; ++i) {
+        if (row_nnz[i] == 0) {
+            ++H.zero_rows;
+            if (H.zero_rows <= print_limit && verbose) std::cerr << "zero row " << i << "\n";
+        }
+    }
+    for (int j = 0; j < H.cols; ++j) {
+        if (col_nnz[j] == 0) {
+            ++H.zero_cols;
+            if (H.zero_cols <= print_limit && verbose) std::cerr << "zero col " << j << "\n";
+        }
+    }
+
+    // zero diagonal
+    for (int i = 0; i < std::min(H.rows, H.cols); ++i) {
+        if (A.coeff(i, i) == 0.0) {
+            ++H.zero_diagonal;
+            if (H.zero_diagonal <= print_limit && verbose) std::cerr << "zero diagonal at " << i << "\n";
+        }
+    }
+
+    // optional inconsistency check with RHS
+    if (Rtot && Rtot->size() == H.rows) {
+        for (int i = 0; i < H.rows; ++i) {
+            if (row_nnz[i] == 0 && std::abs((*Rtot)(i)) > tol) {
+                ++H.inconsistent_zero_rows;
+                if (H.inconsistent_zero_rows <= print_limit && verbose)
+                    std::cerr << "zero row " << i << " but R(" << i << ") = " << (*Rtot)(i) << "\n";
+            }
+        }
+    }
+
+    // optional symmetry check
+    if (expectSym) {
+        Eigen::SparseMatrix<double> AT = A.transpose();
+        Eigen::SparseMatrix<double> Skew = A - AT;
+        const double nrmA = A.norm();
+        const double nrmSkew = Skew.norm();
+        H.rel_asym = nrmSkew / std::max(1e-30, nrmA);
+        std::cerr << "relative asymmetry = " << H.rel_asym << "\n";
+    }
+
+
+
+    H.ok = (H.nonfinite == 0
+            && H.zero_rows == 0
+            && H.zero_cols == 0
+            && (!expectSym || H.rel_asym < 1e-8));
+    if (verbose) {
+        std::cerr << "health: nnz=" << H.nnz
+                  << " zero_rows=" << H.zero_rows
+                  << " zero_cols=" << H.zero_cols
+                  << " zero_diag=" << H.zero_diagonal
+                  << " nonfinite=" << H.nonfinite
+                  << " inconsistent_zero_rows=" << H.inconsistent_zero_rows
+                  << " ok=" << (H.ok ? "yes" : "no") << "\n";
+
+        // quick nullspace hint
+        {
+            Eigen::VectorXd ones = Eigen::VectorXd::Ones(H.cols);
+            H.ones_resid = (A * ones).norm();
+            std::cerr << "||K*1|| = " << H.ones_resid << "\n";
+        }
+    }
+
+    return H;
 }
 
 
@@ -286,19 +408,9 @@ void problem_coupled::Assign_BC(const std::string Corners) {
             }
         }
 
-        // (Optional but helpful) quick consistency check while debugging:
-
     }
 
-    std::cout << "NLC=" << NLC.size()
-              << " NLS=" << NLS.size()
-              << " NLM=" << NLM.size()
-              << " NLP=" << NLP.size() << std::endl;
 
-    printVector(NLC, "NLC");
-    printVector(NLS, "NLS");
-    printVector(NLM, "NLM");
-    printVector(NLP, "NLP");
 
     // === Assign values for corner and periodic nodes ===
 
@@ -579,9 +691,7 @@ Eigen::VectorXd problem_coupled::Residual(double dt)
                 }
             }
         }
-
-
-        // R2 (vector)
+        //R2 vector
         {
             const int dim   = this->PD;       // velocity block size
             const int first0 = 1;             // zero-based: v starts right after c at index 0
@@ -972,42 +1082,6 @@ std::pair<double, double> problem_coupled::calculate_max_min_difference() {
     return {c_range, p_range};
 }
 
-//
-//double problem_coupled::calculate_overall_density() {
-//    double out = 0.0;
-//    int NoE = Element_List.size();
-//
-//    for (int i = 0; i < NoE; ++i) {
-//        out += Element_List[i].density;
-//    }
-//
-//    return out;
-//}
-
-// Optional tiny helpers
-static inline Eigen::VectorXd solve_sparse_linear_system(
-        const Eigen::SparseMatrix<double>& A, const Eigen::VectorXd& b)
-{
-    // Try a fast direct SPD solver first
-    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> ldlt;
-    ldlt.compute(A);
-    if (ldlt.info() == Eigen::Success) {
-        std::cout<<"solved using simplicial"<<std::endl;
-        return ldlt.solve(b);
-    }
-    // Fall back to general sparse LU
-    Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
-    slu.analyzePattern(A);
-    slu.factorize(A);
-    if (slu.info() == Eigen::Success) {
-        std::cout<< "solved using slu"<<std::endl;
-        return slu.solve(b);
-    }
-    // Last resort: iterative
-    Eigen::BiCGSTAB<Eigen::SparseMatrix<double>> bicg;
-    bicg.compute(A);
-    return bicg.solve(b);
-}
 
 void problem_coupled::post_process() {
     // Minimal stub so you can compile/run. Hook your 1D/2D/3D exporters here.
@@ -1034,40 +1108,34 @@ void problem_coupled::solve() {
         bool try_again     = false;
 
         while (isNotAccurate) {
+            //Timer t("while loop");
+
+
             // ---------- Residual + Tangent ----------
             assemble(dt);  // fills: Ktot (Sparse), Rtot (Vector)
             double Norm_R0 = 1.0;
-//            std::cout<<"Ktot at the end of first assemble"<<std::endl;
-//            std::cout<<Eigen::MatrixXd (Ktot).rows() << " x "<< Eigen::MatrixXd (Ktot).cols() <<std::endl;
-//            Eigen::MatrixXd dense = Eigen::MatrixXd(Ktot);
-//            std::cout<<dense<<std::endl;
-//            std::cout << " column (0):\n"
-//                      << dense.col(0) << "\n";
-//            std::cout << " column (1):\n"
-//                      << dense.col(1) << "\n";
-//            std::cout << " column (10):\n"
-//                      << dense.col(10) << "\n";
-//            std::cout<<"Rtot"<<std::endl;
-//            std::cout<<Rtot<<std::endl;
+            auto H = check_matrix_health(Ktot);
+
+            if (H.ok) {
+                Solver = "SparseLU";
+            } else {
+                Solver = "LSQCG";//Least square problem using CG
+            }
+
+//            Solver = "LSQCG";
 
             // ---------- Initial output & predictor residual ----------
 
             if (error_counter == 1) {
+
                 if (counter == 1 && GP_vals == "On") {
                     assemble_GP(dt);
-                    auto testing_GP=Ktot_GP;
-                    auto b_GP=Rtot_GP;
-
-                    Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
-                    slu.analyzePattern(testing_GP);
-                    slu.factorize(testing_GP);
-                    Eigen::VectorXd  dx_GP = slu.solve(-b_GP);
+                    Eigen::VectorXd dx_GP = solve_dx_(Ktot_GP, Rtot_GP, false);
                     update_GP(dx_GP);
                 }
 
-
                 double Norm_R0 = Rtot.norm();
-                std::cout << "Residual Norm at Predictor               : "
+                std::cout << "Residual Norm at Predictor                : "
                           << std::scientific << Rtot.norm()
                           << " , normalized : 1\n";
                 file << "Residual Norm at Predictor               : "
@@ -1075,71 +1143,17 @@ void problem_coupled::solve() {
                      << " , normalized : 1\n";
             }
 
-//            // Ensure column-major + compressed
-//            Eigen::SparseMatrix<double> A = Ktot;   // ColMajor by default
-//            A.makeCompressed();
+
+//            auto testing2=Ktot;
+//            auto b2=Rtot;
 //
-//// Quick sanity
-//            if (A.rows() == 0 || A.cols() == 0) throw std::runtime_error("Empty Ktot");
-//            if (A.rows() != A.cols()) throw std::runtime_error("Ktot not square");
-//            if (Rtot.size() != A.rows()) throw std::runtime_error("RHS size mismatch");
-//
-//// Prefer the one-shot API and check info()
 //            Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
-//            slu.compute(A);
-//            if (slu.info() != Eigen::Success) {
-//                std::cerr << "SparseLU factorization failed: "
-//                          << slu.lastErrorMessage() << "\n";
-//                // fall back to diagnostics (see below)
-//            }
-//            Eigen::VectorXd dx = slu.solve(-Rtot);
-//            if (slu.info() != Eigen::Success) {
-//                std::cerr << "Solve failed: " << slu.lastErrorMessage() << "\n";
-//            }
+//            slu.analyzePattern(testing2);
+//            slu.factorize(testing2);
+////            //std::cout<< "solved using slu"<<std::endl;
+//            Eigen::VectorXd  dx = slu.solve(-b2);
+            Eigen::VectorXd dx = solve_dx_(Ktot, Rtot, false);
 
-
-
-//            std::cout<<"second try" <<std::endl;
-//            // Fall back to general sparse LU
-            auto testing2=Ktot;
-            auto b2=Rtot;
-
-            Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
-            slu.analyzePattern(testing2);
-            slu.factorize(testing2);
-//            //std::cout<< "solved using slu"<<std::endl;
-            Eigen::VectorXd  dx = slu.solve(-b2);
-
-
-
-//            std::cout<<"dx"<<std::endl;
-//            std::cout <<dx<<std::endl;
-
-//            std::cout<<"third try" <<std::endl;
-//            // Fall back to general sparse LU
-//            auto testing3=Ktot;
-//            auto b3=Rtot;
-//            // Last resort: iterative
-//            Eigen::BiCGSTAB<Eigen::SparseMatrix<double>> bicg;
-//            bicg.compute(testing3);
-//            Eigen::VectorXd x3= bicg.solve(b);
-//            std::cout<<"x3"<<std::endl;
-//            std::cout <<x3<<std::endl;
-
-
-
-           // Eigen::VectorXd dx = solve_sparse_linear_system(Ktot, Rtot);
-
-//
-//            std::cout<< "dx" <<std::endl;
-//            std::cout<<dx<<std::endl;
-            Eigen::VectorXd rcheck = Ktot * dx + Rtot;   // should be ~ zero
-            std::cout << "||K dx + R|| = " << rcheck.norm() << "\n";
-
-
-
-//            std::cout<<"y"<<std::endl;
-//            std::cout<<y<<std::endl;
             update(dx);   // updates node and element unknowns from DOFs
 
             // ---------- Recompute residual with updated values ----------
@@ -1194,13 +1208,7 @@ void problem_coupled::solve() {
 
             if (GP_vals == "On") {
                 assemble_GP(dt);
-                auto testing_GP=Ktot_GP;
-                auto b_GP=Rtot_GP;
-
-                Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
-                slu.analyzePattern(testing_GP);
-                slu.factorize(testing_GP);
-                Eigen::VectorXd  dx_GP = slu.solve(-b_GP);
+                Eigen::VectorXd dx_GP = solve_dx_(Ktot_GP, Rtot_GP, false);
                 update_GP(dx_GP);
             }
 
@@ -1227,3 +1235,90 @@ void problem_coupled::solve() {
         file.close();
     } // while t < T
 }
+
+
+
+// problem.cpp
+Eigen::VectorXd problem_coupled::solve_dx_(Eigen::SparseMatrix<double>& Ktot,
+                                           const Eigen::VectorXd& R,
+                                           bool verbose)
+{
+    auto K=Ktot;
+    //if (!K.isCompressed()) K.makeCompressed();
+    const Eigen::VectorXd b = -R;
+
+    if (verbose) {
+        std::cout << " using the following solver: " << Solver << std::endl;
+    }
+
+    Eigen::VectorXd dx;
+
+    if (Solver == "SparseLU" || Solver == "slu") {
+        Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
+        slu.analyzePattern(K);
+        slu.factorize(K);
+        dx = slu.solve(b);
+        if (verbose || slu.info() != Eigen::Success) {
+            std::cerr << "[solve_dx_] SparseLU info=" << int(slu.info()) << "\n";
+        }
+    } else if (Solver == "LSQCG" || Solver == "LeastSquaresConjugateGradient") {
+        Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<double>> lsq;
+        lsq.compute(K);
+        dx = lsq.solve(b);
+        if (verbose || lsq.info() != Eigen::Success) {
+            std::cerr << "[solve_dx_] LSQCG info=" << int(lsq.info())
+                      << " iters=" << lsq.iterations()
+                      << " err=" << (K * dx - b).norm() << "\n";
+        }
+    } else {
+        if (verbose) {
+            std::cerr << "[solve_dx_] Unknown Solver='" << Solver
+                      << "', using BiCGSTAB.\n";
+        }
+        Eigen::BiCGSTAB<Eigen::SparseMatrix<double>, Eigen::DiagonalPreconditioner<double>> bicg;
+        bicg.compute(K);
+        dx = bicg.solve(b);
+        if (verbose || bicg.info() != Eigen::Success) {
+            std::cerr << "[solve_dx_] BiCGSTAB info=" << int(bicg.info())
+                      << " iters=" << bicg.iterations()
+                      << " err=" << (K * dx - b).norm() << "\n";
+        }
+    }
+
+    if (verbose) {
+        const double abs_res = (K * dx + R).norm();
+        const double rel_res = abs_res / std::max(1e-30, R.norm());
+        std::cerr << "[solve_dx_] residual abs=" << abs_res << " rel=" << rel_res << "\n";
+    }
+
+    return dx;
+}
+
+void printSparseTriplets(const Eigen::SparseMatrix<double>& Ain,
+                         std::ostream& os,
+                         bool one_based)
+{
+    Eigen::SparseMatrix<double> A = Ain;
+    A.makeCompressed();
+
+    os << std::setprecision(17);
+    for (int outer = 0; outer < A.outerSize(); ++outer) {
+        for (Eigen::SparseMatrix<double>::InnerIterator it(A, outer); it; ++it) {
+            int r = it.row();
+            int c = it.col();
+            if (one_based) { ++r; ++c; }
+            os << r << " " << c << " " << it.value() << "\n";
+        }
+    }
+}
+
+void writeTripletsToFile(const Eigen::SparseMatrix<double>& A,
+                         const std::string& path,
+                         bool one_based = true)
+{
+    std::ofstream f(path);
+    if (!f) throw std::runtime_error("Cannot open " + path);
+    printSparseTriplets(A, f, one_based);
+    f.close();
+}
+

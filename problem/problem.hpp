@@ -2,7 +2,10 @@
 #define PROBLEM_COUPLED_HPP
 
 #include <string>
+#include <chrono>
 #include <vector>
+#include <iomanip>
+#include <string>
 #include "../Eigen/Dense"
 #include "../Eigen/Sparse"
 #include <fstream>
@@ -12,6 +15,7 @@
 #include "../Eigen/SparseCholesky"
 #include "../Eigen/SparseLU"
 #include "../Eigen/IterativeLinearSolvers"
+#include <limits>
 
 
 class problem_coupled {
@@ -53,6 +57,9 @@ public:
 
     Eigen::VectorXd Rtot_GP;
     Eigen::SparseMatrix<double> Ktot_GP;
+
+
+    std::string Solver;
     // === Constructor ===
     problem_coupled(int PD,
                     std::vector<Node>& NL,
@@ -90,6 +97,9 @@ private:
     std::pair<double, double> calculate_max_min_difference();
     double calculate_overall_density();
     void solve();
+    Eigen::VectorXd solve_dx_(Eigen::SparseMatrix<double>& Ktot,
+                              const Eigen::VectorXd& R,
+                              bool verbose = false);
 
 
 
