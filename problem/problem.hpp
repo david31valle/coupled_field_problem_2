@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <Eigen/OrderingMethods>
 
 
 

@@ -13,6 +13,21 @@
 #include "element.hpp"
 #include "../utils/utils.hpp"  // compute_gp, compute_N_xi_gp, printMatrix
 
+template <class Derived>
+inline void printEigen(const std::string& name,
+                       const Eigen::MatrixBase<Derived>& X) {
+    static const Eigen::IOFormat fmt(
+            Eigen::StreamPrecision,  // precision
+            0,                       // no alignment commas
+            " ",                     // coeff separator
+            "\n",                    // row separator
+            "", "",                  // row prefix/suffix
+            "", ""                   // mat prefix/suffix
+    );
+    std::cout << name << "  (" << X.rows() << "x" << X.cols() << ")\n"
+              << X.format(fmt) << "\n\n";
+}
+
 element::element(int Nr, int PD,
                  const Eigen::VectorXd& NdL1,
                  const Eigen::VectorXd& NdL2,
@@ -415,6 +430,21 @@ element::RK(double dt) {
                   c_gp, v_gp, cn_gp, vn_gp,
                   Gradc_gp, Gradv_gp, Gradcn_gp, Gradvn_gp);
 
+//    printEigen("c_gp",      c_gp);        // VectorXd
+//    printEigen("cn_gp",     cn_gp);       // VectorXd
+//    printEigen("v_gp",      v_gp);        // MatrixXd
+//    printEigen("vn_gp",     vn_gp);       // MatrixXd
+//    printEigen("Gradc_gp",  Gradc_gp);    // MatrixXd
+//    printEigen("Gradcn_gp", Gradcn_gp);   // MatrixXd
+//    printEigen("Gradv_gp",  Gradv_gp);    // MatrixXd
+//    printEigen("Gradvn_gp", Gradvn_gp);   // MatrixXd
+//    printEigen("N1", N1);
+//    printEigen("N2", N2);
+//    printEigen("GradN1", GradN1);
+//    printEigen("GradN2", GradN2);
+
+
+
 // Allocate residuals and blocks
     Eigen::VectorXd R1 = Eigen::VectorXd::Zero(NPE1);       // c
     Eigen::VectorXd R2 = Eigen::VectorXd::Zero(NPE2 * PD);  // v
@@ -480,7 +510,7 @@ element::RK(double dt) {
                                                                     std::vector<Eigen::MatrixXd>(PD, Eigen::MatrixXd::Zero(PD, PD)));
         }
         else if (PD == 2) {
-            sig     = -(E * M_PI * R * R * c) / (1.0 - M_PI * R * R * c) * II;
+            sig     =  -(E * M_PI * R * R * c) / (1.0 - M_PI * R * R * c) * II;
             dsig_dc = -(E * M_PI * R * R) / std::pow(1.0 - M_PI * R * R * c, 2) * II;
 
             dsig_dv     = Eigen::MatrixXd::Zero(PD, PD * PD);

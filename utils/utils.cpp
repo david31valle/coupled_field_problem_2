@@ -55,7 +55,7 @@ std::vector<std::vector<double>> compute_gp(int NGP, int PD) {
                 double a = sqrt(0.6);
                 double  w1 = 5.0/9.0;
                 double  w2 = 8.0/9.0;
-                std::vector<double> xi  = { a, 0, a, -a, 0, a, -a, 0, a};
+                std::vector<double> xi  = { -a, 0, a, -a, 0, a, -a, 0, a};
                 std::vector<double> eta = { -a, -a, -a, 0, 0, 0, a, a, a};
                 std::vector<double> w   = { w1 * w1, w2 * w1, w1 * w1, w2 * w1, w2 * w2, w2 * w1, w1 * w1, w2 * w1, w1 * w1 };
                 GP.push_back(xi);

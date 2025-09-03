@@ -9,6 +9,9 @@
 #include <set>
 
 
+void writeTripletsToFile(const Eigen::SparseMatrix<double>& A,
+                    const std::string& path,
+                    bool one_based = true);
 class Timer {
 public:
     Timer(const std::string& name = "Timer")
@@ -20,13 +23,33 @@ public:
                 std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
         std::cout << name << " took " << duration << " ms\n";
     }
-
-
-
 private:
     std::string name;
     std::chrono::high_resolution_clock::time_point start;
 };
+
+template <class Derived>
+void writeVectorToFile(const Eigen::MatrixBase<Derived>& v_expr,
+                       const std::string& path,
+                       bool withIndex = false,
+                       bool oneBased  = true,
+                       int precision  = 17)
+{
+    const auto& v = v_expr.derived();
+    std::ofstream f(path);
+    if (!f) throw std::runtime_error("Cannot open file: " + path);
+
+    f << std::setprecision(precision);
+    for (Eigen::Index i = 0; i < v.size(); ++i) {
+        if (withIndex) {
+            long long idx = static_cast<long long>(i) + (oneBased ? 1 : 0);
+            f << idx << " " << v(i) << "\n";
+        } else {
+            f << v(i) << "\n";
+        }
+    }
+    f.close();
+}
 
 struct MatrixHealth {
     int rows = 0, cols = 0;
@@ -748,95 +771,81 @@ void problem_coupled::assemble(double dt) {
         // Assemble contribution of R1
 
         auto [R1, R2, K11, K12, K21, K22] = Element_List[e].RK(dt);
+//        std::cout<<K11<<std::endl;
+//        std::cout<<K12<<std::endl;
+//        std::cout<<K21<<std::endl;
+//        std::cout<<K22<<std::endl;
+
         const auto& NdL1 = Element_List[e].NdL1;
         const auto& NdL2 = Element_List[e].NdL2;
 
-        const int dim   = 1;
-        const int first = 0;
-        const int last  = dim - 1;
-
-            for (int i = 0; i < NPE1; ++i)
-            {
-                int nodeIdx = static_cast<int>(NdL1(i)) - 1;
-                const auto& BC  = Node_List[nodeIdx].BC;
-                const auto& DOF = Node_List[nodeIdx].DOF;
-
-                for (int p = first; p <= last; ++p)
-                {
-                    if (BC(p) == 1)
-                    {
-                        int g = static_cast<int>(DOF(p)) - 1;
-                        int r = i * dim + p;
-                        Rtot(g) += R1(r);
-                    }
-                }
-
-            }
-
-        // Assemble contribution of R2
         {
-            int dim = PD;
-            int first = 1;         // corresponds to MATLAB last+1 (last=0 above)
-            int last = first + dim - 1;
+            const int dim   = 1;      // scalar field (cell)
+            const int first = 0;      // MATLAB 1..dim  -> C++ 0..dim-1
+            const int last  = first + dim - 1;
 
-            for (int i = 0; i < NPE2; ++i) {
-                int nodeIdx = static_cast<int>(NdL2(i)) - 1;
-                const auto &BC = Node_List[nodeIdx].BC;
-                const auto &DOF = Node_List[nodeIdx].DOF;
+            for (int i = 0; i < NPE1; ++i) {
+                const int nodeIdx = static_cast<int>(Element_List[e].NdL1(i)) - 1;  // NdL1 is 1-based
+                const auto& BC  = Node_List[nodeIdx].BC;   // indexable: BC(p)
+                const auto& DOF = Node_List[nodeIdx].DOF;  // 1-based global DOF ids
 
                 for (int p = first; p <= last; ++p) {
                     if (BC(p) == 1) {
-                        int g = static_cast<int>(DOF(p)) - 1;
-                        int r = i * dim + (p - first);
+                        const int g = static_cast<int>(DOF(p)) - 1;              // 0-based global DOF
+                        const int r = i * dim + (p - first);                    // local slot: 0..dim-1
+                        Rtot(g) += R1(r);
+                    }
+                }
+            }
+        }
+
+        // Assemble contribution of R2
+        {
+            const int dim   = PD;    // velocity
+            const int first = 1;     // MATLAB first = last(prev)+1 -> 2; shift down by 1 => 1..PD
+            const int last  = first + dim - 1;
+
+            for (int i = 0; i < NPE2; ++i) {
+                const int nodeIdx = static_cast<int>(Element_List[e].NdL2(i)) - 1; // NdL2 is 1-based
+                const auto& BC  = Node_List[nodeIdx].BC;   // slots: 0=scalar, 1..PD=velocity
+                const auto& DOF = Node_List[nodeIdx].DOF;  // 1-based global DOF ids
+
+                for (int p = first; p <= last; ++p) {
+                    if (BC(p) == 1) {
+                        const int g = static_cast<int>(DOF(p)) - 1;        // 0-based global DOF
+                        const int r = i * dim + (p - first);               // local 0..PD-1
                         Rtot(g) += R2(r);
                     }
                 }
-
             }
         }
+
         // Assemble contributions of K11 and K12 into triplets
+        // ---- K11 and K12 ----
         {
-            const int dim_i = 1;
-            const int first_i = 0, last_i = 0;
+            const int dim_i   = 1;         // scalar (cell)
+            const int first_i = 0;         // MATLAB 1..1 -> C++ 0..0
+            const int last_i  = first_i + dim_i - 1;
 
             for (int i = 0; i < NPE1; ++i) {
-                int node_i = static_cast<int>(NdL1(i)) - 1;
+                const int node_i = static_cast<int>(Element_List[e].NdL1(i)) - 1;
                 const auto& BC_i  = Node_List[node_i].BC;
                 const auto& DOF_i = Node_List[node_i].DOF;
 
                 for (int p = first_i; p <= last_i; ++p) {
                     if (BC_i(p) != 1) continue;
 
-                    const int row = static_cast<int>(DOF_i(p)) - 1;
+                    const int row  = static_cast<int>(DOF_i(p)) - 1;
+                    const int rloc = i * dim_i + (p - first_i);   // = i
 
-                    // --- K11 ---
+                    // ---------- K11 ----------
                     {
-                        const int dim_j = 1;
-                        const int first_j = 0, last_j = 0;
+                        const int dim_j   = 1;     // scalar (cell)
+                        const int first_j = 0;     // MATLAB 1..1 -> C++ 0..0
+                        const int last_j  = first_j + dim_j - 1;
 
                         for (int j = 0; j < NPE1; ++j) {
-                            int node_j = static_cast<int>(NdL1(j)) - 1;
-                            const auto& BC_j  = Node_List[node_j].BC;
-                            const auto& DOF_j = Node_List[node_j].DOF;
-
-                            for (int q = first_j; q <= last_j; ++q) {
-                                if (BC_j(q) != 1) continue;
-
-                                const int col = static_cast<int>(DOF_j(q)) - 1;
-                                const int rloc = i * dim_i + (p - first_i);          // = i
-                                const int cloc = j * dim_j + (q - first_j);          // = j
-                                triplets.emplace_back(row, col, K11(rloc, cloc));
-                            }
-                        }
-                    }
-
-                    // --- K12 ---
-                    {
-                        const int dim_j = PD;
-                        const int first_j = 1, last_j = first_j + dim_j - 1;        // 1..PD
-
-                        for (int j = 0; j < NPE2; ++j) {
-                            int node_j = static_cast<int>(NdL2(j)) - 1;
+                            const int node_j = static_cast<int>(Element_List[e].NdL1(j)) - 1;
                             const auto& BC_j  = Node_List[node_j].BC;
                             const auto& DOF_j = Node_List[node_j].DOF;
 
@@ -844,8 +853,28 @@ void problem_coupled::assemble(double dt) {
                                 if (BC_j(q) != 1) continue;
 
                                 const int col  = static_cast<int>(DOF_j(q)) - 1;
-                                const int rloc = i * dim_i + (p - first_i);          // = i
-                                const int cloc = j * dim_j + (q - first_j);          // j*PD + (q-1)
+                                const int cloc = j * dim_j + (q - first_j);  // = j
+                                triplets.emplace_back(row, col, K11(rloc, cloc));
+                            }
+                        }
+                    }
+
+                    // ---------- K12 ----------
+                    {
+                        const int dim_j   = PD;     // velocity
+                        const int first_j = 1;      // MATLAB 2..PD+1 -> C++ 1..PD
+                        const int last_j  = first_j + dim_j - 1;
+
+                        for (int j = 0; j < NPE2; ++j) {
+                            const int node_j = static_cast<int>(Element_List[e].NdL2(j)) - 1;
+                            const auto& BC_j  = Node_List[node_j].BC;
+                            const auto& DOF_j = Node_List[node_j].DOF;
+
+                            for (int q = first_j; q <= last_j; ++q) {
+                                if (BC_j(q) != 1) continue;
+
+                                const int col  = static_cast<int>(DOF_j(q)) - 1;
+                                const int cloc = j * dim_j + (q - first_j);  // j*PD + (q-1)
                                 triplets.emplace_back(row, col, K12(rloc, cloc));
                             }
                         }
@@ -854,54 +883,61 @@ void problem_coupled::assemble(double dt) {
             }
         }
 
-        // Assemble contributions of K21 and K22 into triplets
+//         Assemble contributions of K21 and K22 into triplets
+// ---- K21 and K22 ----
         {
-            const int dim_i = PD;
-            const int first_i = 1, last_i = first_i + dim_i - 1;   // velocity block: 1..PD
+            const int dim_i   = PD;   // velocity rows
+            const int first_i = 1;    // MATLAB (last_i+1) -> velocity slots start at 1
+            const int last_i  = first_i + dim_i - 1;  // 1..PD
 
             for (int i = 0; i < NPE2; ++i) {
-                int node_i = static_cast<int>(NdL2(i)) - 1;
+                const int node_i = static_cast<int>(Element_List[e].NdL2(i)) - 1;
                 const auto& BC_i  = Node_List[node_i].BC;
                 const auto& DOF_i = Node_List[node_i].DOF;
 
                 for (int p = first_i; p <= last_i; ++p) {
                     if (BC_i(p) != 1) continue;
-                    const int row = static_cast<int>(DOF_i(p)) - 1;
-                    const int rloc = i * dim_i + (p - first_i);     // i*PD + (p-1)
 
-                    // --- K21 ---
+                    const int row  = static_cast<int>(DOF_i(p)) - 1;          // global row
+                    const int rloc = i * dim_i + (p - first_i);               // local 0..PD-1
+
+                    // ---------- K21 ----------
                     {
-                        const int dim_j = 1;
-                        const int first_j = 0, last_j = 0;          // scalar block: 0..0
+                        const int dim_j   = 1;    // scalar cols
+                        const int first_j = 0;    // scalar slot
+                        const int last_j  = first_j + dim_j - 1;  // 0..0
 
                         for (int j = 0; j < NPE1; ++j) {
-                            int node_j = static_cast<int>(NdL1(j)) - 1;
+                            const int node_j = static_cast<int>(Element_List[e].NdL1(j)) - 1;
                             const auto& BC_j  = Node_List[node_j].BC;
                             const auto& DOF_j = Node_List[node_j].DOF;
 
                             for (int q = first_j; q <= last_j; ++q) {
                                 if (BC_j(q) != 1) continue;
+
                                 const int col  = static_cast<int>(DOF_j(q)) - 1;
-                                const int cloc = j * dim_j + (q - first_j); // = j
+                                const int cloc = j * dim_j + (q - first_j);   // = j
                                 triplets.emplace_back(row, col, K21(rloc, cloc));
                             }
                         }
                     }
 
-                    // --- K22 ---
+                    // ---------- K22 ----------
                     {
-                        const int dim_j = PD;
-                        const int first_j = 1, last_j = first_j + dim_j - 1; // velocity block: 1..PD
+                        const int dim_j   = PD;   // velocity cols
+                        const int first_j = 1;    // velocity slots 1..PD
+                        const int last_j  = first_j + dim_j - 1;
 
                         for (int j = 0; j < NPE2; ++j) {
-                            int node_j = static_cast<int>(NdL2(j)) - 1;
+                            const int node_j = static_cast<int>(Element_List[e].NdL2(j)) - 1;
                             const auto& BC_j  = Node_List[node_j].BC;
                             const auto& DOF_j = Node_List[node_j].DOF;
 
                             for (int q = first_j; q <= last_j; ++q) {
                                 if (BC_j(q) != 1) continue;
+
                                 const int col  = static_cast<int>(DOF_j(q)) - 1;
-                                const int cloc = j * dim_j + (q - first_j); // j*PD + (q-1)
+                                const int cloc = j * dim_j + (q - first_j);   // j*PD + (q-1)
                                 triplets.emplace_back(row, col, K22(rloc, cloc));
                             }
                         }
@@ -909,6 +945,7 @@ void problem_coupled::assemble(double dt) {
                 }
             }
         }
+
 
     }
 
@@ -1010,7 +1047,7 @@ void problem_coupled::problem_info() {
         throw std::runtime_error("filename está vacío");
     }
 
-    // Info a consola como ya haces
+    // Info a consola como ya hacess
     int NoEs = Element_List.size();
     int NoNs = Node_List.size();
     cout << "======================================================" << endl;
@@ -1162,8 +1199,7 @@ void problem_coupled::solve() {
             } else {
                 Solver = "LSQCG";//Least square problem using CG
             }
-
-//            Solver = "LSQCG";
+            //Solver = "LSQCG";
 
             // ---------- Initial output & predictor residual ----------
 
@@ -1183,16 +1219,36 @@ void problem_coupled::solve() {
                      << std::scientific << Rtot.norm()
                      << " , normalized : 1\n";
             }
-
-
-//            auto testing2=Ktot;
-//            auto b2=Rtot;
+//            std::cout<<"Ktot 4,0 "<< Ktot.coeff(4,0)<< "\n";
+            //writeTripletsToFile(Ktot, "C:\\Users\\drva_\\CLionProjects\\coupled_field_problem_2\\matrix.txt", /*one_based=*/true); // to file
+//
+//            auto A = Ktot;
+//            //A.makeCompressed();
 //
 //            Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
-//            slu.analyzePattern(testing2);
-//            slu.factorize(testing2);
-////            //std::cout<< "solved using slu"<<std::endl;
-//            Eigen::VectorXd  dx = slu.solve(-b2);
+//            slu.analyzePattern(A);
+//            slu.factorize(A);
+//            auto dx = slu.solve(-Rtot);
+            //A.makeCompressed();
+
+            //using Precond = Eigen::DiagonalPreconditioner<double>;  // simple y seguro
+//            Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<double>> lscg;
+
+//            lscg.setTolerance(1e-10);
+//            lscg.setMaxIterations(5000);
+
+//            lscg.compute(A);
+//            if (lscg.info() != Eigen::Success) {
+//                std::cerr << "Fallo en compute()" << std::endl;
+//            }
+//
+//            Eigen::VectorXd dx = lscg.solve(Rtot);
+//            std::cout << "#iter: " << lscg.iterations()
+//                      << "  error: " << lscg.error() << std::endl;
+//
+//            if (lscg.info() != Eigen::Success) {
+//                std::cerr << "Fallo en solve()" << std::endl;
+//            }
             Eigen::VectorXd dx = solve_dx_(Ktot, Rtot, false);
 
             update(dx);   // updates node and element unknowns from DOFs
@@ -1211,6 +1267,8 @@ void problem_coupled::solve() {
             // ---------- Convergence / failure checks ----------
             if (Rn < tol) {
                 isNotAccurate = false;
+                writeVectorToFile(dx, "C:\\Users\\drva_\\CLionProjects\\coupled_field_problem_2\\vector.txt");
+
             } else if (error_counter > max_iter || Rn > 1e6) {
                 isNotAccurate = false;
                 std::cout << "Convergence is not obtained!\n";
@@ -1257,12 +1315,12 @@ void problem_coupled::solve() {
             update_time(); // commit c→cn, v→vn, u→un
 
             if (time_incr_method == "Adaptive") {
-                if (error_counter < 5) {
+                if (error_counter < 6) {
                     dt = dt * time_factor;
                     std::ofstream f2(filename, std::ios::app);
                     std::cout << "\nIncreasing time step to: " << std::scientific << dt << "\n\n";
                     f2        << "\nIncreasing time step to: " << std::scientific << dt << "\n\n";
-                } else if (error_counter > 8) {
+                } else if (error_counter > 9) {
                     dt = dt / time_factor;
                     std::ofstream f2(filename, std::ios::app);
                     std::cout << "\nReducing time step to: " << std::scientific << dt << "\n\n";
@@ -1351,15 +1409,18 @@ void printSparseTriplets(const Eigen::SparseMatrix<double>& Ain,
             os << r << " " << c << " " << it.value() << "\n";
         }
     }
+    std::cout<<"print successful" << "\n";
 }
 
 void writeTripletsToFile(const Eigen::SparseMatrix<double>& A,
                          const std::string& path,
-                         bool one_based = true)
+                         bool one_based)
 {
     std::ofstream f(path);
     if (!f) throw std::runtime_error("Cannot open " + path);
     printSparseTriplets(A, f, one_based);
     f.close();
 }
+
+
 
