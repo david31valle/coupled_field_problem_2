@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.26)
 project(coupled_field_problem_2)
 
 set(CMAKE_CXX_STANDARD 17)
-
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
 set(SRCS
         main.cpp
         Eigen
@@ -41,3 +41,7 @@ set(CMAKE_UNITY_BUILD ON)                           # big speedup on GCC/Clang
 
 # Extra optimization flags for GCC/Clang
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()

@@ -1151,16 +1151,13 @@ void problem_coupled::post_process() {
     // Minimal stub so you can compile/run. Hook your 1D/2D/3D exporters here.
     // e.g., write nodal c and v to file if you want.
     // Build "vtk/step_XXXX.vtk" (ParaView will group the series automatically)
-    std::filesystem::create_directories("vtk");
-    char fn[64]; std::snprintf(fn, sizeof(fn), "vtk/step_%04d.vtk", counter);
-
-    vtkpp::Options opt;
-    opt.add_vertex_cells = true;
-    vtkpp::write_step_vtk(fn, Node_List, Element_List, PD, counter, t, opt);
-
-    static vtkpp::PvdSeries series("vtk/series.pvd");
-    series.add(t, std::string(fn).substr(4));
-    // call series.close() once when your run ends (e.g., in a finalize() or destructor)
+    // MATLAB-like outputs (1D/2D/3D) → VTK POLYDATA files in ./vtk
+    // Auto-detects PD from nodes and writes the matching set for this step.
+    try {
+        vtkio::Post_Process(Node_List, Element_List, counter, "output/vtk", /*write_gp=*/true);
+    } catch (const std::exception& e) {
+        std::cerr << "[post_process] " << e.what() << std::endl;
+    }
 }
 
 void problem_coupled::output_step_info() {
@@ -1267,7 +1264,7 @@ void problem_coupled::solve() {
             // ---------- Convergence / failure checks ----------
             if (Rn < tol) {
                 isNotAccurate = false;
-                writeVectorToFile(dx, "C:\\Users\\drva_\\CLionProjects\\coupled_field_problem_2\\vector.txt");
+                //writeVectorToFile(dx, "C:\\Users\\drva_\\CLionProjects\\coupled_field_problem_2\\vector.txt");
 
             } else if (error_counter > max_iter || Rn > 1e6) {
                 isNotAccurate = false;

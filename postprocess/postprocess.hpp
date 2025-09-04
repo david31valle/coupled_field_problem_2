@@ -1,50 +1,38 @@
-//
-// Created by Maitreya Limkar on 30-08-2025.
-//
-
-#ifndef COUPLED_FIELD_PROBLEM_2_POSTPROCESS_HPP
-#define COUPLED_FIELD_PROBLEM_2_POSTPROCESS_HPP
-
-#include <string>
+#pragma once
 #include <vector>
-#include "../node/node.hpp"
-#include "../element/element.hpp"
+#include <string>
 
-// Forward declarations; these are your project types.
-struct Node;
-struct element;
+struct Node;     // expected fields: int PD; Eigen::VectorXd x,u,field,GP_vals;
+struct element;  // not used here but kept for signature parity
 
-namespace vtkpp {
+namespace vtkio {
 
-    struct Options {
-        bool add_vertex_cells = true;   // also emit 1-pt cells so nodes can render as points
-    };
+    /** Dimension-aware dispatcher (calls 1D/2D/3D based on NL.front().PD) */
+    void Post_Process(const std::vector<Node>& NL,
+                      const std::vector<element>& EL,
+                      int step,
+                      const std::string& out_dir = "vtk",
+                      bool write_gp = true);
 
-    /// Write one legacy ASCII .vtk frame (unstructured grid).
-    /// Expects:
-    ///   - NL[i].X(j) : reference coordinates (j = 0..PD-1)
-    ///   - NL[i].u(k) : c at k=0, v at k=1..PD, optional p at k=1+PD
-    ///   - EL[e].NdL1(a) : 1-based connectivity (a = 0..NPE-1)
-    ///   - EL[e].NPE1    : nodes per element (NPE)
-    void write_step_vtk(const std::string& filepath,
-                        const std::vector<Node>& NL,
-                        const std::vector<element>& EL,
-                        int PD, int step, double time,
-                        const Options& opt = {});
+    /** 1D: writes c & v legacy POLYDATA (scatter + polyline) */
+    void Post_Process_1D(const std::vector<Node>& NL,
+                         const std::vector<element>& EL,
+                         int step,
+                         const std::string& out_dir = "vtk",
+                         bool write_gp = true);
 
-    /// Simple .pvd series writer so ParaView groups frames automatically.
-    class PvdSeries {
-    public:
-        explicit PvdSeries(const std::string& pvdPath);
-        void add(double time, const std::string& relativeVtkFile); // call once per frame
-        void close();                                              // call once at the end
-        ~PvdSeries();
-    private:
-        std::string path_;
-        bool open_ = false;
-        void ensure_open_();
-    };
+    /** 2D: writes six POLYDATA files (c/vx/vy at z=0 and z=scalar) */
+    void Post_Process_2D(const std::vector<Node>& NL,
+                         const std::vector<element>& EL,
+                         int step,
+                         const std::string& out_dir = "vtk",
+                         bool write_gp = true);
 
-} // namespace vtkpp
+    /** 3D: writes four POLYDATA files (c, vx, vy, vz) with MATLAB-like filtering */
+    void Post_Process_3D(const std::vector<Node>& NL,
+                         const std::vector<element>& EL,
+                         int step,
+                         const std::string& out_dir = "vtk",
+                         bool write_gp = true);
 
-#endif //COUPLED_FIELD_PROBLEM_2_POSTPROCESS_HPP
+} // namespace vtkio
