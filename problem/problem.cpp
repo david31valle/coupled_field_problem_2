@@ -1153,11 +1153,82 @@ void problem_coupled::post_process() {
     // Build "vtk/step_XXXX.vtk" (ParaView will group the series automatically)
     // MATLAB-like outputs (1D/2D/3D) → VTK POLYDATA files in ./vtk
     // Auto-detects PD from nodes and writes the matching set for this step.
-    try {
-        vtkio::Post_Process(Node_List, Element_List, counter, "output/vtk", /*write_gp=*/true);
-    } catch (const std::exception& e) {
-        std::cerr << "[post_process] " << e.what() << std::endl;
+    // Create configuration for post-processing
+        // --- 1. Configuration ---
+    PostProcess::Config config;
+    config.output_directory = "vtk_output";
+    config.create_subdirectory = true;
+    config.time_step = this->counter;
+    config.problem_dimension = this->PD;
+    config.write_binary_vtk = false;
+
+    // --- 2. Instantiate the Post-Processor ---
+    // Note: We now use the generalized PostProcessor class
+    PostProcess::PostProcessor vtk_writer(config);
+
+    // --- 3. Data Transfer: Nodes ---
+    // Convert the simulation's Node_List into the format required by PostProcessor.
+    std::vector<PostProcess::NodeData> nodes_for_vtk;
+    nodes_for_vtk.reserve(Node_List.size());
+
+    for (size_t i = 0; i < Node_List.size(); ++i) {
+        const auto& sim_node = Node_List[i];
+        PostProcess::NodeData vtk_node;
+
+        vtk_node.id = static_cast<int>(i);
+
+        // --- IMPORTANT: Map 1D/2D/3D coordinates to a 3D vector ---
+        // The post-processor internally uses 3D vectors. We pad with zeros.
+        vtk_node.x.setZero(); // Start with a zero vector
+        for(int d=0; d < this->PD; ++d) {
+            vtk_node.x(d) = sim_node.X(d);
+        }
+
+        vtk_node.u = sim_node.u;
+        vtk_node.GP_vals = sim_node.GP_vals;
+
+        // Determine active fields based on Boundary Condition flags (1 = free DOF)
+        vtk_node.field.setZero();
+        if (sim_node.BC.size() > 0 && sim_node.BC(0) == 1.0) {
+            vtk_node.field(0) = 1; // Cell density field is active
+        }
+
+        bool velocity_active = false;
+        for (int d = 1; d <= this->PD; ++d) {
+            if (sim_node.BC.size() > d && sim_node.BC(d) == 1.0) {
+                velocity_active = true;
+                break;
+            }
+        }
+        if (velocity_active) {
+            vtk_node.field(1) = 1; // Velocity field is active
+        }
+
+        nodes_for_vtk.push_back(vtk_node);
     }
+    vtk_writer.setNodeData(nodes_for_vtk);
+
+    // --- 4. Data Transfer: Elements (no changes needed here) ---
+    std::vector<PostProcess::ElementData> elements_for_vtk;
+    elements_for_vtk.reserve(Element_List.size());
+    for (size_t i = 0; i < Element_List.size(); ++i) {
+        const auto& sim_elem = Element_List[i];
+        PostProcess::ElementData vtk_elem;
+        vtk_elem.id = static_cast<int>(i);
+        vtk_elem.NPE1 = sim_elem.NPE1;
+        vtk_elem.NPE2 = sim_elem.NPE2;
+        vtk_elem.GP = sim_elem.GP;
+        vtk_elem.connectivity.reserve(sim_elem.NdL1.size());
+        for (Eigen::Index j = 0; j < sim_elem.NdL1.size(); ++j) {
+            vtk_elem.connectivity.push_back(static_cast<int>(sim_elem.NdL1(j)) - 1);
+        }
+        elements_for_vtk.push_back(vtk_elem);
+    }
+    vtk_writer.setElementData(elements_for_vtk);
+
+    // --- 5. Process and Write Files ---
+   // std::cout << "\n--- Post-processing for step " << counter << " (" << this->PD << "D) ---" << std::endl;
+    vtk_writer.process();
 }
 
 void problem_coupled::output_step_info() {
