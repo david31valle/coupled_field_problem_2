@@ -70,7 +70,7 @@ inline MatrixHealth check_matrix_health(const Eigen::SparseMatrix<double>& Ktot,
                                         int print_limit = 10,
                                         bool verbose=false)
 {
-    //Timer t("Matrix health");
+    Timer t("Matrix health");
 
     MatrixHealth H;
     Eigen::SparseMatrix<double> A = Ktot;
@@ -223,6 +223,7 @@ problem_coupled::problem_coupled(
 
 
 void problem_coupled::Assign_BC(const std::string Corners) {
+    Timer t("Assigning BC");
     int NoNs = Node_List.size();
     double tol = 1e-6;
 
@@ -744,6 +745,7 @@ Eigen::VectorXd problem_coupled::Residual(double dt)
 
 
 void problem_coupled::assemble(double dt) {
+    Timer t("Assamble");
     // === MATLAB: NoEs = size(EL,2); NoNs = size(NL,2); ===
     const int NoEs = static_cast<int>(Element_List.size());
     const int NoNs = static_cast<int>(Node_List.size());
@@ -770,7 +772,119 @@ void problem_coupled::assemble(double dt) {
     for (int e = 0; e < NoEs; ++e) {
         // Assemble contribution of R1
 
-        auto [R1, R2, K11, K12, K21, K22] = Element_List[e].RK(dt);
+            auto [R1, R2, K11, K12, K21, K22] = Element_List[e].RK(dt);
+
+
+        // Per element e
+        struct Slot { int g; int loc; }; // global dof, local index (within element block)
+
+// Pre-allocate small fixed arrays for scalar rows/cols (NPE1 is small)
+        std::array<Slot, 64> rows_scalar;  int n_rows_scalar = 0;
+        std::array<Slot, 64> cols_scalar;  int n_cols_scalar = 0;
+
+// Velocity rows/cols are dynamic (NPE2*PD)
+        std::vector<Slot> rows_vel; rows_vel.reserve(NPE2 * PD);
+        std::vector<Slot> cols_vel; cols_vel.reserve(NPE2 * PD);
+
+// ---------- Collect scalar rows (NdL1, p=0) and do R1 residual ----------
+        for (int i = 0; i < NPE1; ++i) {
+            const int node = static_cast<int>(Element_List[e].NdL1(i)) - 1;
+            const auto& BC  = Node_List[node].BC;
+            if (BC(0) != 1) continue;
+
+            const auto& DOF = Node_List[node].DOF;
+            const int g  = static_cast<int>(DOF(0)) - 1;  // 0-based
+            const int li = i;                              // dim=1 => local = i
+            rows_scalar[n_rows_scalar++] = {g, li};
+            Rtot(g) += R1(li);
+        }
+
+// ---------- Collect scalar cols (NdL1, q=0). Reused by K11 and K21 ----------
+        for (int j = 0; j < NPE1; ++j) {
+            const int node = static_cast<int>(Element_List[e].NdL1(j)) - 1;
+            const auto& BC  = Node_List[node].BC;
+            if (BC(0) != 1) continue;
+
+            const auto& DOF = Node_List[node].DOF;
+            const int g  = static_cast<int>(DOF(0)) - 1;
+            const int lj = j; // dim=1
+            cols_scalar[n_cols_scalar++] = {g, lj};
+        }
+
+// ---------- Collect velocity rows (NdL2, p=1..PD) and do R2 residual ----------
+        for (int i = 0; i < NPE2; ++i) {
+            const int node = static_cast<int>(Element_List[e].NdL2(i)) - 1;
+            const auto& BC  = Node_List[node].BC;
+            const auto& DOF = Node_List[node].DOF;
+
+            for (int p = 1; p <= PD; ++p) {
+                if (BC(p) != 1) continue;
+                const int g   = static_cast<int>(DOF(p)) - 1;
+                const int li  = i * PD + (p - 1);
+                rows_vel.push_back({g, li});
+                Rtot(g) += R2(li);
+            }
+        }
+
+// ---------- Collect velocity cols (NdL2, q=1..PD). Reused by K12 and K22 ----------
+        for (int j = 0; j < NPE2; ++j) {
+            const int node = static_cast<int>(Element_List[e].NdL2(j)) - 1;
+            const auto& BC  = Node_List[node].BC;
+            const auto& DOF = Node_List[node].DOF;
+
+            for (int q = 1; q <= PD; ++q) {
+                if (BC(q) != 1) continue;
+                const int g   = static_cast<int>(DOF(q)) - 1;
+                const int lj  = j * PD + (q - 1);
+                cols_vel.push_back({g, lj});
+            }
+        }
+
+// ---------- Reserve triplets once for all four blocks ----------
+        {
+            const int rs = n_rows_scalar;
+            const int cs = n_cols_scalar;
+            const int rv = static_cast<int>(rows_vel.size());
+            const int cv = static_cast<int>(cols_vel.size());
+            triplets.reserve(triplets.size() + rs*cs + rs*cv + rv*cs + rv*cv);
+        }
+
+// ---------- K11: scalar rows x scalar cols ----------
+        for (int r = 0; r < n_rows_scalar; ++r) {
+            const int grow = rows_scalar[r].g;
+            const int li   = rows_scalar[r].loc;
+            for (int c = 0; c < n_cols_scalar; ++c) {
+                const int gcol = cols_scalar[c].g;
+                const int lj   = cols_scalar[c].loc;
+                triplets.emplace_back(grow, gcol, K11(li, lj));
+            }
+        }
+
+// ---------- K12: scalar rows x velocity cols ----------
+        for (int r = 0; r < n_rows_scalar; ++r) {
+            const int grow = rows_scalar[r].g;
+            const int li   = rows_scalar[r].loc;
+            for (const auto& cv : cols_vel) {
+                triplets.emplace_back(grow, cv.g, K12(li, cv.loc));
+            }
+        }
+
+// ---------- K21: velocity rows x scalar cols ----------
+        for (const auto& rv_ : rows_vel) {
+            for (int c = 0; c < n_cols_scalar; ++c) {
+                const auto& cs = cols_scalar[c];
+                triplets.emplace_back(rv_.g, cs.g, K21(rv_.loc, cs.loc));
+            }
+        }
+
+// ---------- K22: velocity rows x velocity cols ----------
+        for (const auto& rv_ : rows_vel) {
+            for (const auto& cv : cols_vel) {
+                triplets.emplace_back(rv_.g, cv.g, K22(rv_.loc, cv.loc));
+            }
+        }
+
+        //
 //        std::cout<<K11<<std::endl;
 //        std::cout<<K12<<std::endl;
 //        std::cout<<K21<<std::endl;
@@ -779,172 +893,175 @@ void problem_coupled::assemble(double dt) {
         const auto& NdL1 = Element_List[e].NdL1;
         const auto& NdL2 = Element_List[e].NdL2;
 
-        {
-            const int dim   = 1;      // scalar field (cell)
-            const int first = 0;      // MATLAB 1..dim  -> C++ 0..dim-1
-            const int last  = first + dim - 1;
+//        {
+//            const int dim   = 1;      // scalar field (cell)
+//            const int first = 0;      // MATLAB 1..dim  -> C++ 0..dim-1
+//            const int last  = first + dim - 1;
+//
+//            for (int i = 0; i < NPE1; ++i) {
+//                const int nodeIdx = static_cast<int>(Element_List[e].NdL1(i)) - 1;  // NdL1 is 1-based
+//                const auto& BC  = Node_List[nodeIdx].BC;   // indexable: BC(p)
+//                const auto& DOF = Node_List[nodeIdx].DOF;  // 1-based global DOF ids
+//
+//                for (int p = first; p <= last; ++p) {
+//                    if (BC(p) == 1) {
+//                        const int g = static_cast<int>(DOF(p)) - 1;              // 0-based global DOF
+//                        const int r = i * dim + (p - first);                    // local slot: 0..dim-1
+//                        Rtot(g) += R1(r);
+//                    }
+//                }
+//            }
+//        }
 
-            for (int i = 0; i < NPE1; ++i) {
-                const int nodeIdx = static_cast<int>(Element_List[e].NdL1(i)) - 1;  // NdL1 is 1-based
-                const auto& BC  = Node_List[nodeIdx].BC;   // indexable: BC(p)
-                const auto& DOF = Node_List[nodeIdx].DOF;  // 1-based global DOF ids
-
-                for (int p = first; p <= last; ++p) {
-                    if (BC(p) == 1) {
-                        const int g = static_cast<int>(DOF(p)) - 1;              // 0-based global DOF
-                        const int r = i * dim + (p - first);                    // local slot: 0..dim-1
-                        Rtot(g) += R1(r);
-                    }
-                }
-            }
-        }
 
         // Assemble contribution of R2
-        {
-            const int dim   = PD;    // velocity
-            const int first = 1;     // MATLAB first = last(prev)+1 -> 2; shift down by 1 => 1..PD
-            const int last  = first + dim - 1;
-
-            for (int i = 0; i < NPE2; ++i) {
-                const int nodeIdx = static_cast<int>(Element_List[e].NdL2(i)) - 1; // NdL2 is 1-based
-                const auto& BC  = Node_List[nodeIdx].BC;   // slots: 0=scalar, 1..PD=velocity
-                const auto& DOF = Node_List[nodeIdx].DOF;  // 1-based global DOF ids
-
-                for (int p = first; p <= last; ++p) {
-                    if (BC(p) == 1) {
-                        const int g = static_cast<int>(DOF(p)) - 1;        // 0-based global DOF
-                        const int r = i * dim + (p - first);               // local 0..PD-1
-                        Rtot(g) += R2(r);
-                    }
-                }
-            }
-        }
+//        {
+//            const int dim   = PD;    // velocity
+//            const int first = 1;     // MATLAB first = last(prev)+1 -> 2; shift down by 1 => 1..PD
+//            const int last  = first + dim - 1;
+//
+//            for (int i = 0; i < NPE2; ++i) {
+//                const int nodeIdx = static_cast<int>(Element_List[e].NdL2(i)) - 1; // NdL2 is 1-based
+//                const auto& BC  = Node_List[nodeIdx].BC;   // slots: 0=scalar, 1..PD=velocity
+//                const auto& DOF = Node_List[nodeIdx].DOF;  // 1-based global DOF ids
+//
+//                for (int p = first; p <= last; ++p) {
+//                    if (BC(p) == 1) {
+//                        const int g = static_cast<int>(DOF(p)) - 1;        // 0-based global DOF
+//                        const int r = i * dim + (p - first);               // local 0..PD-1
+//                        Rtot(g) += R2(r);
+//                    }
+//                }
+//            }
+//        }
 
         // Assemble contributions of K11 and K12 into triplets
         // ---- K11 and K12 ----
-        {
-            const int dim_i   = 1;         // scalar (cell)
-            const int first_i = 0;         // MATLAB 1..1 -> C++ 0..0
-            const int last_i  = first_i + dim_i - 1;
-
-            for (int i = 0; i < NPE1; ++i) {
-                const int node_i = static_cast<int>(Element_List[e].NdL1(i)) - 1;
-                const auto& BC_i  = Node_List[node_i].BC;
-                const auto& DOF_i = Node_List[node_i].DOF;
-
-                for (int p = first_i; p <= last_i; ++p) {
-                    if (BC_i(p) != 1) continue;
-
-                    const int row  = static_cast<int>(DOF_i(p)) - 1;
-                    const int rloc = i * dim_i + (p - first_i);   // = i
-
-                    // ---------- K11 ----------
-                    {
-                        const int dim_j   = 1;     // scalar (cell)
-                        const int first_j = 0;     // MATLAB 1..1 -> C++ 0..0
-                        const int last_j  = first_j + dim_j - 1;
-
-                        for (int j = 0; j < NPE1; ++j) {
-                            const int node_j = static_cast<int>(Element_List[e].NdL1(j)) - 1;
-                            const auto& BC_j  = Node_List[node_j].BC;
-                            const auto& DOF_j = Node_List[node_j].DOF;
-
-                            for (int q = first_j; q <= last_j; ++q) {
-                                if (BC_j(q) != 1) continue;
-
-                                const int col  = static_cast<int>(DOF_j(q)) - 1;
-                                const int cloc = j * dim_j + (q - first_j);  // = j
-                                triplets.emplace_back(row, col, K11(rloc, cloc));
-                            }
-                        }
-                    }
-
-                    // ---------- K12 ----------
-                    {
-                        const int dim_j   = PD;     // velocity
-                        const int first_j = 1;      // MATLAB 2..PD+1 -> C++ 1..PD
-                        const int last_j  = first_j + dim_j - 1;
-
-                        for (int j = 0; j < NPE2; ++j) {
-                            const int node_j = static_cast<int>(Element_List[e].NdL2(j)) - 1;
-                            const auto& BC_j  = Node_List[node_j].BC;
-                            const auto& DOF_j = Node_List[node_j].DOF;
-
-                            for (int q = first_j; q <= last_j; ++q) {
-                                if (BC_j(q) != 1) continue;
-
-                                const int col  = static_cast<int>(DOF_j(q)) - 1;
-                                const int cloc = j * dim_j + (q - first_j);  // j*PD + (q-1)
-                                triplets.emplace_back(row, col, K12(rloc, cloc));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+//        {
+//            const int dim_i   = 1;         // scalar (cell)
+//            const int first_i = 0;         // MATLAB 1..1 -> C++ 0..0
+//            const int last_i  = first_i + dim_i - 1;
+//
+//            for (int i = 0; i < NPE1; ++i) {
+//                const int node_i = static_cast<int>(Element_List[e].NdL1(i)) - 1;
+//                const auto& BC_i  = Node_List[node_i].BC;
+//                const auto& DOF_i = Node_List[node_i].DOF;
+//
+//                for (int p = first_i; p <= last_i; ++p) {
+//                    if (BC_i(p) != 1) continue;
+//
+//                    const int row  = static_cast<int>(DOF_i(p)) - 1;
+//                    const int rloc = i * dim_i + (p - first_i);   // = i
+//
+//                    // ---------- K11 ----------
+//                    {
+//                        const int dim_j   = 1;     // scalar (cell)
+//                        const int first_j = 0;     // MATLAB 1..1 -> C++ 0..0
+//                        const int last_j  = first_j + dim_j - 1;
+//
+//                        for (int j = 0; j < NPE1; ++j) {
+//                            const int node_j = static_cast<int>(Element_List[e].NdL1(j)) - 1;
+//                            const auto& BC_j  = Node_List[node_j].BC;
+//                            const auto& DOF_j = Node_List[node_j].DOF;
+//
+//                            for (int q = first_j; q <= last_j; ++q) {
+//                                if (BC_j(q) != 1) continue;
+//
+//                                const int col  = static_cast<int>(DOF_j(q)) - 1;
+//                                const int cloc = j * dim_j + (q - first_j);  // = j
+//                                triplets.emplace_back(row, col, K11(rloc, cloc));
+//                            }
+//                        }
+//                    }
+//
+//                    // ---------- K12 ----------
+//                    {
+//                        const int dim_j   = PD;     // velocity
+//                        const int first_j = 1;      // MATLAB 2..PD+1 -> C++ 1..PD
+//                        const int last_j  = first_j + dim_j - 1;
+//
+//                        for (int j = 0; j < NPE2; ++j) {
+//                            const int node_j = static_cast<int>(Element_List[e].NdL2(j)) - 1;
+//                            const auto& BC_j  = Node_List[node_j].BC;
+//                            const auto& DOF_j = Node_List[node_j].DOF;
+//
+//                            for (int q = first_j; q <= last_j; ++q) {
+//                                if (BC_j(q) != 1) continue;
+//
+//                                const int col  = static_cast<int>(DOF_j(q)) - 1;
+//                                const int cloc = j * dim_j + (q - first_j);  // j*PD + (q-1)
+//                                triplets.emplace_back(row, col, K12(rloc, cloc));
+//                            }
+//                        }
+//                    }
+//                }
+//            }
+//        }
 
 //         Assemble contributions of K21 and K22 into triplets
 // ---- K21 and K22 ----
-        {
-            const int dim_i   = PD;   // velocity rows
-            const int first_i = 1;    // MATLAB (last_i+1) -> velocity slots start at 1
-            const int last_i  = first_i + dim_i - 1;  // 1..PD
+//        {
+//            const int dim_i   = PD;   // velocity rows
+//            const int first_i = 1;    // MATLAB (last_i+1) -> velocity slots start at 1
+//            const int last_i  = first_i + dim_i - 1;  // 1..PD
+//
+//            for (int i = 0; i < NPE2; ++i) {
+//                const int node_i = static_cast<int>(Element_List[e].NdL2(i)) - 1;
+//                const auto& BC_i  = Node_List[node_i].BC;
+//                const auto& DOF_i = Node_List[node_i].DOF;
+//
+//                for (int p = first_i; p <= last_i; ++p) {
+//                    if (BC_i(p) != 1) continue;
+//
+//                    const int row  = static_cast<int>(DOF_i(p)) - 1;          // global row
+//                    const int rloc = i * dim_i + (p - first_i);               // local 0..PD-1
+//
+//                    // ---------- K21 ----------
+//                    {
+//                        const int dim_j   = 1;    // scalar cols
+//                        const int first_j = 0;    // scalar slot
+//                        const int last_j  = first_j + dim_j - 1;  // 0..0
+//
+//                        for (int j = 0; j < NPE1; ++j) {
+//                            const int node_j = static_cast<int>(Element_List[e].NdL1(j)) - 1;
+//                            const auto& BC_j  = Node_List[node_j].BC;
+//                            const auto& DOF_j = Node_List[node_j].DOF;
+//
+//                            for (int q = first_j; q <= last_j; ++q) {
+//                                if (BC_j(q) != 1) continue;
+//
+//                                const int col  = static_cast<int>(DOF_j(q)) - 1;
+//                                const int cloc = j * dim_j + (q - first_j);   // = j
+//                                triplets.emplace_back(row, col, K21(rloc, cloc));
+//                            }
+//                        }
+//                    }
+//
+//                    // ---------- K22 ----------
+//                    {
+//                        const int dim_j   = PD;   // velocity cols
+//                        const int first_j = 1;    // velocity slots 1..PD
+//                        const int last_j  = first_j + dim_j - 1;
+//
+//                        for (int j = 0; j < NPE2; ++j) {
+//                            const int node_j = static_cast<int>(Element_List[e].NdL2(j)) - 1;
+//                            const auto& BC_j  = Node_List[node_j].BC;
+//                            const auto& DOF_j = Node_List[node_j].DOF;
+//
+//                            for (int q = first_j; q <= last_j; ++q) {
+//                                if (BC_j(q) != 1) continue;
+//
+//                                const int col  = static_cast<int>(DOF_j(q)) - 1;
+//                                const int cloc = j * dim_j + (q - first_j);   // j*PD + (q-1)
+//                                triplets.emplace_back(row, col, K22(rloc, cloc));
+//                            }
+//                        }
+//                    }
+//                }
+//            }
+//        }
 
-            for (int i = 0; i < NPE2; ++i) {
-                const int node_i = static_cast<int>(Element_List[e].NdL2(i)) - 1;
-                const auto& BC_i  = Node_List[node_i].BC;
-                const auto& DOF_i = Node_List[node_i].DOF;
 
-                for (int p = first_i; p <= last_i; ++p) {
-                    if (BC_i(p) != 1) continue;
-
-                    const int row  = static_cast<int>(DOF_i(p)) - 1;          // global row
-                    const int rloc = i * dim_i + (p - first_i);               // local 0..PD-1
-
-                    // ---------- K21 ----------
-                    {
-                        const int dim_j   = 1;    // scalar cols
-                        const int first_j = 0;    // scalar slot
-                        const int last_j  = first_j + dim_j - 1;  // 0..0
-
-                        for (int j = 0; j < NPE1; ++j) {
-                            const int node_j = static_cast<int>(Element_List[e].NdL1(j)) - 1;
-                            const auto& BC_j  = Node_List[node_j].BC;
-                            const auto& DOF_j = Node_List[node_j].DOF;
-
-                            for (int q = first_j; q <= last_j; ++q) {
-                                if (BC_j(q) != 1) continue;
-
-                                const int col  = static_cast<int>(DOF_j(q)) - 1;
-                                const int cloc = j * dim_j + (q - first_j);   // = j
-                                triplets.emplace_back(row, col, K21(rloc, cloc));
-                            }
-                        }
-                    }
-
-                    // ---------- K22 ----------
-                    {
-                        const int dim_j   = PD;   // velocity cols
-                        const int first_j = 1;    // velocity slots 1..PD
-                        const int last_j  = first_j + dim_j - 1;
-
-                        for (int j = 0; j < NPE2; ++j) {
-                            const int node_j = static_cast<int>(Element_List[e].NdL2(j)) - 1;
-                            const auto& BC_j  = Node_List[node_j].BC;
-                            const auto& DOF_j = Node_List[node_j].DOF;
-
-                            for (int q = first_j; q <= last_j; ++q) {
-                                if (BC_j(q) != 1) continue;
-
-                                const int col  = static_cast<int>(DOF_j(q)) - 1;
-                                const int cloc = j * dim_j + (q - first_j);   // j*PD + (q-1)
-                                triplets.emplace_back(row, col, K22(rloc, cloc));
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
 
     }
@@ -1086,7 +1203,7 @@ void problem_coupled::problem_info() {
 
     // Útil para entender rutas relativas
     cerr << "Working directory: " << fs::current_path().string() << "\n";
-    cerr << "Escribiré en     : " << fs::absolute(outPath).string() << "\n";
+    cerr <<  "Writing in    : " << fs::absolute(outPath).string() << "\n";
 
     // Abre con excepciones activadas para detectar fallos reales
     std::ofstream file;
@@ -1317,7 +1434,7 @@ void problem_coupled::solve() {
 //            if (lscg.info() != Eigen::Success) {
 //                std::cerr << "Fallo en solve()" << std::endl;
 //            }
-            Eigen::VectorXd dx = solve_dx_(Ktot, Rtot, false);
+            Eigen::VectorXd dx = solve_dx_(Ktot, Rtot, true);
 
             update(dx);   // updates node and element unknowns from DOFs
 
@@ -1405,12 +1522,71 @@ void problem_coupled::solve() {
 
 
 
+//Eigen::VectorXd problem_coupled::solve_dx_(const Eigen::SparseMatrix<double>& Ktot,
+//                                           const Eigen::VectorXd& R,
+//                                           bool verbose)
+//{
+
+//
+//    Eigen::SparseMatrix<double> const* Kptr = &Ktot;
+//    if (!Ktot.isCompressed()) {
+//        // Make a compressed temporary view only if needed (rare once you manage assembly)
+//        auto& Knc = const_cast<Eigen::SparseMatrix<double>&>(Ktot);
+//        Knc.makeCompressed();
+//    }
+//
+//    const Eigen::VectorXd b = -R;
+//    if (verbose) std::cout << " using the following solver: " << Solver << std::endl;
+//
+//    Eigen::VectorXd dx;
+//    if (Solver == "SparseLU" || Solver == "slu") {
+//        Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
+//        slu.analyzePattern(*Kptr);      // does not modify K
+//        slu.factorize(*Kptr);           // does not modify K
+//        dx = slu.solve(b);
+//        if (verbose || slu.info() != Eigen::Success)
+//            std::cerr << "[solve_dx_] SparseLU info=" << int(slu.info()) << "\n";
+//
+//    } else if (Solver == "LSQCG" || Solver == "LeastSquaresConjugateGradient") {
+//        // For square systems this is usually not ideal; prefer CG for SPD or BiCGSTAB/GMRES otherwise.
+//        Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<double>> lsq;
+//        lsq.compute(*Kptr);
+//        dx = lsq.solve(b);
+//        if (verbose || lsq.info() != Eigen::Success)
+//            std::cerr << "[solve_dx_] LSQCG info=" << int(lsq.info())
+//                      << " iters=" << lsq.iterations()
+//                      << " err=" << (*Kptr * dx - b).norm() << "\n";
+//
+//    } else {
+//        if (verbose) std::cerr << "[solve_dx_] Unknown Solver='" << Solver << "', using BiCGSTAB.\n";
+//        // A better default preconditioner than plain diagonal:
+//        Eigen::BiCGSTAB<Eigen::SparseMatrix<double>, Eigen::IncompleteLUT<double>> bicg;
+//        //Eigen::IncompleteLUT<double> ilut; ilut.setFillfactor(5); ilut.setDroptol(1e-3);
+//        //bicg.preconditioner(ilut);
+//        bicg.compute(*Kptr);
+//        dx = bicg.solve(b);
+//        if (verbose || bicg.info() != Eigen::Success)
+//            std::cerr << "[solve_dx_] BiCGSTAB info=" << int(bicg.info())
+//                      << " iters=" << bicg.iterations()
+//                      << " err=" << (*Kptr * dx - b).norm() << "\n";
+//    }
+//
+//    if (verbose) {
+//        const double abs_res = (*Kptr * dx + R).norm();
+//        const double rel_res = abs_res / std::max(1e-30, R.norm());
+//        std::cerr << "[solve_dx_] residual abs=" << abs_res << " rel=" << rel_res << "\n";
+//    }
+//    return dx;
+//}
+
+
 // problem.cpp
 Eigen::VectorXd problem_coupled::solve_dx_(Eigen::SparseMatrix<double>& Ktot,
                                            const Eigen::VectorXd& R,
-                                           bool verbose)
-{
-    auto K=Ktot;
+                                           bool verbose) {
+
+    //Timer t("Time solving the system");
+    auto K = Ktot;
     //if (!K.isCompressed()) K.makeCompressed();
     const Eigen::VectorXd b = -R;
 
@@ -1421,6 +1597,7 @@ Eigen::VectorXd problem_coupled::solve_dx_(Eigen::SparseMatrix<double>& Ktot,
     Eigen::VectorXd dx;
 
     if (Solver == "SparseLU" || Solver == "slu") {
+        Timer t("time SLu");
         Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
         slu.analyzePattern(K);
         slu.factorize(K);
@@ -1429,6 +1606,7 @@ Eigen::VectorXd problem_coupled::solve_dx_(Eigen::SparseMatrix<double>& Ktot,
             std::cerr << "[solve_dx_] SparseLU info=" << int(slu.info()) << "\n";
         }
     } else if (Solver == "LSQCG" || Solver == "LeastSquaresConjugateGradient") {
+        Timer t("Time solving LSQCG");
         Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<double>> lsq;
         lsq.compute(K);
         dx = lsq.solve(b);
@@ -1458,8 +1636,81 @@ Eigen::VectorXd problem_coupled::solve_dx_(Eigen::SparseMatrix<double>& Ktot,
         std::cerr << "[solve_dx_] residual abs=" << abs_res << " rel=" << rel_res << "\n";
     }
 
+
+
+//    if (true) {
+//        Timer t("SVD");
+//        // SVD is dense: convert sparse K -> dense
+//        Eigen::MatrixXd Kd = Eigen::MatrixXd(K);      // densify (watch memory/time)
+//        Eigen::VectorXd bd = b;                       // already dense
+//
+//        // Thin U/V keeps memory under control and is enough to solve
+//        Eigen::BDCSVD<Eigen::MatrixXd> svd;
+//        svd.compute(Kd, Eigen::ComputeThinU | Eigen::ComputeThinV);
+//
+//        auto dx2 = svd.solve(bd);
+//
+//        if (true) {
+//            const auto s = svd.singularValues();
+//            double smax = (s.size() ? s(0) : 0.0);
+//            double smin = (s.size() ? s.tail(1)(0) : 0.0);
+//            std::ptrdiff_t rank = svd.rank();
+//            std::cerr << "[solve_dx_] BDCSVD "
+//                      << "rank=" << rank << "/" << Kd.cols()
+//                      << " smax=" << smax << " smin=" << smin
+//                      << " cond~=" << (smin > 0.0 ? smax / smin : std::numeric_limits<double>::infinity())
+//                      << " residual=" << (Kd * dx2 - bd).norm()
+//                      << "\n";
+//        }
+//    }
+
+    if (true) {
+        Timer t("Sparse Qr");
+        auto test2 = K;
+        Eigen::SparseQR<Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int>> qr;
+        qr.setPivotThreshold(1.0); // full pivoting effect (default is 1.0)
+        qr.compute(test2);
+        auto dx3 = qr.solve(b);
+        if (true || qr.info() != Eigen::Success) {
+            std::cerr << "[solve_dx_] SparseQR info=" << int(qr.info())
+                      << " rank=" << qr.rank() << "/" << K.cols()
+                      << " residual=" << (K * dx3 - b).norm() << "\n";
+        }
+    }
+
+    if (true){
+        Timer t("Time with guessing");
+        using Sp = Eigen::SparseMatrix<double>;
+        using Vec = Eigen::VectorXd;
+
+        //static Vec dx_prev;                 // keep previous solution to warm-start
+        if (dx_prev.size() != b.size())     // resize on first call / size change
+            dx_prev = Vec::Zero(b.size());
+
+        // Try a stronger preconditioner for the normal equations:
+        // (works when K^T K is SPD; with rank loss it still helps a bit)
+        Eigen::LeastSquaresConjugateGradient<Sp, Eigen::IncompleteCholesky<double>> lsq;
+
+        lsq.setTolerance(1e-10);            // tune; or make it relative to ||b||
+        lsq.setMaxIterations(2 * K.cols()); // don’t let it spin forever
+        lsq.compute(K);                     // recompute each time since entries change
+
+        // Warm-start
+        auto dx4 = lsq.solveWithGuess(b, dx_prev);
+
+//        if (verbose || lsq.info() != Eigen::Success) {
+//            std::cerr << "[solve_dx_] LSQCG info=" << int(lsq.info())
+//                      << " iters=" << lsq.iterations()
+//                      << " err=" << (K * dx4 - b).norm() << "\n";
+//        }
+        dx_prev = dx;
+    }
     return dx;
 }
+
+
+
+
 
 void printSparseTriplets(const Eigen::SparseMatrix<double>& Ain,
                          std::ostream& os,

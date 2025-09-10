@@ -4,6 +4,7 @@
 
 
 std::vector<std::vector<double>> compute_gp(int NGP, int PD) {
+    std::cout<<"here in compute_gp"<<std::endl;
     std::vector<std::vector<double>> GP;
 
     switch (PD) {
@@ -233,6 +234,7 @@ std::vector<std::vector<double>> compute_gp(int NGP, int PD) {
 
 
 std::pair<std::vector<std::vector<double>>, std::vector<std::vector<double>>> compute_N_xi_gp(int degree, const std::vector<std::vector<double>>& GP, int PD) {
+    std::cout<<"here in compute_N_xi"<<std::endl;
     int NGP = GP[0].size();
     std::vector<double> xi, w, eta, zeta;
 

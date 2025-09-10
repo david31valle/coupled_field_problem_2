@@ -28,6 +28,7 @@ set(SRCS
         problem/problem.cpp
         postprocess/postprocess.hpp
         postprocess/postprocess.cpp
+        element/shape_cache.hpp
 )
 
 add_executable(coupled_field_problem_2 ${SRCS})
@@ -39,9 +40,12 @@ configure_file(${CMAKE_SOURCE_DIR}/config.ini
 # (Optional build time wins)
 set(CMAKE_UNITY_BUILD ON)                           # big speedup on GCC/Clang
 
-# Extra optimization flags for GCC/Clang
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
-
+# Default to Release if not provided
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
+
+# Extra optimization flags for Release
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
+
+add_compile_definitions(EIGEN_NO_DEBUG)

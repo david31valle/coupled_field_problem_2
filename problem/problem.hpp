@@ -65,6 +65,8 @@ public:
 
 
     std::string Solver;
+    Eigen::SparseLU<Eigen::SparseMatrix<double>> slu_;
+    bool slu_pattern_init_ = false;
     // === Constructor ===
     problem_coupled(int PD,
                     std::vector<Node>& NL,
@@ -104,7 +106,11 @@ private:
     void solve();
     Eigen::VectorXd solve_dx_(Eigen::SparseMatrix<double>& Ktot,
                               const Eigen::VectorXd& R,
-                              bool verbose = false);
+                              bool verbose = true);
+    Eigen::VectorXd dx_prev;
+//    Eigen::VectorXd solve_dx_(const Eigen::SparseMatrix<double>& Ktot,
+//                                               const Eigen::VectorXd& R,
+//                                               bool verbose =false);
 
 
 

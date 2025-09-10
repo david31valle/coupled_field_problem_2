@@ -7,6 +7,9 @@
 #include <tuple>
 #include <iomanip>
 #include <cmath>
+#include <chrono>
+#include "shape_cache.hpp"
+
 
 
 // Extended element class for coupled scalar-vector field FEM problems
