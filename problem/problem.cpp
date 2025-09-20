@@ -1637,33 +1637,6 @@ Eigen::VectorXd problem_coupled::solve_dx_(Eigen::SparseMatrix<double>& Ktot,
     }
 
 
-
-//    if (true) {
-//        Timer t("SVD");
-//        // SVD is dense: convert sparse K -> dense
-//        Eigen::MatrixXd Kd = Eigen::MatrixXd(K);      // densify (watch memory/time)
-//        Eigen::VectorXd bd = b;                       // already dense
-//
-//        // Thin U/V keeps memory under control and is enough to solve
-//        Eigen::BDCSVD<Eigen::MatrixXd> svd;
-//        svd.compute(Kd, Eigen::ComputeThinU | Eigen::ComputeThinV);
-//
-//        auto dx2 = svd.solve(bd);
-//
-//        if (true) {
-//            const auto s = svd.singularValues();
-//            double smax = (s.size() ? s(0) : 0.0);
-//            double smin = (s.size() ? s.tail(1)(0) : 0.0);
-//            std::ptrdiff_t rank = svd.rank();
-//            std::cerr << "[solve_dx_] BDCSVD "
-//                      << "rank=" << rank << "/" << Kd.cols()
-//                      << " smax=" << smax << " smin=" << smin
-//                      << " cond~=" << (smin > 0.0 ? smax / smin : std::numeric_limits<double>::infinity())
-//                      << " residual=" << (Kd * dx2 - bd).norm()
-//                      << "\n";
-//        }
-//    }
-
     if (true) {
         Timer t("Sparse Qr");
         auto test2 = K;
