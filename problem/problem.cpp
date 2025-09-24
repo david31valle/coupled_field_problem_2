@@ -70,7 +70,7 @@ inline MatrixHealth check_matrix_health(const Eigen::SparseMatrix<double>& Ktot,
                                         int print_limit = 10,
                                         bool verbose=false)
 {
-    Timer t("Matrix health");
+    // t("Matrix health");
 
     MatrixHealth H;
     Eigen::SparseMatrix<double> A = Ktot;
@@ -1403,7 +1403,7 @@ void problem_coupled::solve() {
                      << std::scientific << Rtot.norm()
                      << " , normalized : 1\n";
             }
-            Eigen::VectorXd dx = solve_dx_(Ktot, Rtot, true);
+            Eigen::VectorXd dx = solve_dx_(Ktot, Rtot, false);
 
             update(dx);   // updates node and element unknowns from DOFs
 
