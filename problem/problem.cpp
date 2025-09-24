@@ -223,7 +223,7 @@ problem_coupled::problem_coupled(
 
 
 void problem_coupled::Assign_BC(const std::string Corners) {
-    Timer t("Assigning BC");
+    //Timer t("Assigning BC");
     int NoNs = Node_List.size();
     double tol = 1e-6;
 
@@ -745,7 +745,7 @@ Eigen::VectorXd problem_coupled::Residual(double dt)
 
 
 void problem_coupled::assemble(double dt) {
-    Timer t("Assamble");
+    //Timer t("Assamble");
     // === MATLAB: NoEs = size(EL,2); NoNs = size(NL,2); ===
     const int NoEs = static_cast<int>(Element_List.size());
     const int NoNs = static_cast<int>(Node_List.size());
@@ -1389,7 +1389,6 @@ void problem_coupled::solve() {
             // ---------- Initial output & predictor residual ----------
 
             if (error_counter == 1) {
-
                 if (counter == 1 && GP_vals == "On") {
                     assemble_GP(dt);
                     Eigen::VectorXd dx_GP = solve_dx_(Ktot_GP, Rtot_GP, false);
@@ -1404,36 +1403,6 @@ void problem_coupled::solve() {
                      << std::scientific << Rtot.norm()
                      << " , normalized : 1\n";
             }
-//            std::cout<<"Ktot 4,0 "<< Ktot.coeff(4,0)<< "\n";
-            //writeTripletsToFile(Ktot, "C:\\Users\\drva_\\CLionProjects\\coupled_field_problem_2\\matrix.txt", /*one_based=*/true); // to file
-//
-//            auto A = Ktot;
-//            //A.makeCompressed();
-//
-//            Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
-//            slu.analyzePattern(A);
-//            slu.factorize(A);
-//            auto dx = slu.solve(-Rtot);
-            //A.makeCompressed();
-
-            //using Precond = Eigen::DiagonalPreconditioner<double>;  // simple y seguro
-//            Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<double>> lscg;
-
-//            lscg.setTolerance(1e-10);
-//            lscg.setMaxIterations(5000);
-
-//            lscg.compute(A);
-//            if (lscg.info() != Eigen::Success) {
-//                std::cerr << "Fallo en compute()" << std::endl;
-//            }
-//
-//            Eigen::VectorXd dx = lscg.solve(Rtot);
-//            std::cout << "#iter: " << lscg.iterations()
-//                      << "  error: " << lscg.error() << std::endl;
-//
-//            if (lscg.info() != Eigen::Success) {
-//                std::cerr << "Fallo en solve()" << std::endl;
-//            }
             Eigen::VectorXd dx = solve_dx_(Ktot, Rtot, true);
 
             update(dx);   // updates node and element unknowns from DOFs
@@ -1520,66 +1489,6 @@ void problem_coupled::solve() {
     } // while t < T
 }
 
-
-
-//Eigen::VectorXd problem_coupled::solve_dx_(const Eigen::SparseMatrix<double>& Ktot,
-//                                           const Eigen::VectorXd& R,
-//                                           bool verbose)
-//{
-
-//
-//    Eigen::SparseMatrix<double> const* Kptr = &Ktot;
-//    if (!Ktot.isCompressed()) {
-//        // Make a compressed temporary view only if needed (rare once you manage assembly)
-//        auto& Knc = const_cast<Eigen::SparseMatrix<double>&>(Ktot);
-//        Knc.makeCompressed();
-//    }
-//
-//    const Eigen::VectorXd b = -R;
-//    if (verbose) std::cout << " using the following solver: " << Solver << std::endl;
-//
-//    Eigen::VectorXd dx;
-//    if (Solver == "SparseLU" || Solver == "slu") {
-//        Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
-//        slu.analyzePattern(*Kptr);      // does not modify K
-//        slu.factorize(*Kptr);           // does not modify K
-//        dx = slu.solve(b);
-//        if (verbose || slu.info() != Eigen::Success)
-//            std::cerr << "[solve_dx_] SparseLU info=" << int(slu.info()) << "\n";
-//
-//    } else if (Solver == "LSQCG" || Solver == "LeastSquaresConjugateGradient") {
-//        // For square systems this is usually not ideal; prefer CG for SPD or BiCGSTAB/GMRES otherwise.
-//        Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<double>> lsq;
-//        lsq.compute(*Kptr);
-//        dx = lsq.solve(b);
-//        if (verbose || lsq.info() != Eigen::Success)
-//            std::cerr << "[solve_dx_] LSQCG info=" << int(lsq.info())
-//                      << " iters=" << lsq.iterations()
-//                      << " err=" << (*Kptr * dx - b).norm() << "\n";
-//
-//    } else {
-//        if (verbose) std::cerr << "[solve_dx_] Unknown Solver='" << Solver << "', using BiCGSTAB.\n";
-//        // A better default preconditioner than plain diagonal:
-//        Eigen::BiCGSTAB<Eigen::SparseMatrix<double>, Eigen::IncompleteLUT<double>> bicg;
-//        //Eigen::IncompleteLUT<double> ilut; ilut.setFillfactor(5); ilut.setDroptol(1e-3);
-//        //bicg.preconditioner(ilut);
-//        bicg.compute(*Kptr);
-//        dx = bicg.solve(b);
-//        if (verbose || bicg.info() != Eigen::Success)
-//            std::cerr << "[solve_dx_] BiCGSTAB info=" << int(bicg.info())
-//                      << " iters=" << bicg.iterations()
-//                      << " err=" << (*Kptr * dx - b).norm() << "\n";
-//    }
-//
-//    if (verbose) {
-//        const double abs_res = (*Kptr * dx + R).norm();
-//        const double rel_res = abs_res / std::max(1e-30, R.norm());
-//        std::cerr << "[solve_dx_] residual abs=" << abs_res << " rel=" << rel_res << "\n";
-//    }
-//    return dx;
-//}
-
-
 // problem.cpp
 Eigen::VectorXd problem_coupled::solve_dx_(Eigen::SparseMatrix<double>& Ktot,
                                            const Eigen::VectorXd& R,
@@ -1597,7 +1506,7 @@ Eigen::VectorXd problem_coupled::solve_dx_(Eigen::SparseMatrix<double>& Ktot,
     Eigen::VectorXd dx;
 
     if (Solver == "SparseLU" || Solver == "slu") {
-        Timer t("time SLu");
+        //Timer t("time SLu");
         Eigen::SparseLU<Eigen::SparseMatrix<double>> slu;
         slu.analyzePattern(K);
         slu.factorize(K);
@@ -1606,15 +1515,19 @@ Eigen::VectorXd problem_coupled::solve_dx_(Eigen::SparseMatrix<double>& Ktot,
             std::cerr << "[solve_dx_] SparseLU info=" << int(slu.info()) << "\n";
         }
     } else if (Solver == "LSQCG" || Solver == "LeastSquaresConjugateGradient") {
-        Timer t("Time solving LSQCG");
-        Eigen::LeastSquaresConjugateGradient<Eigen::SparseMatrix<double>> lsq;
-        lsq.compute(K);
-        dx = lsq.solve(b);
-        if (verbose || lsq.info() != Eigen::Success) {
-            std::cerr << "[solve_dx_] LSQCG info=" << int(lsq.info())
-                      << " iters=" << lsq.iterations()
-                      << " err=" << (K * dx - b).norm() << "\n";
-        }
+        using Sp = Eigen::SparseMatrix<double>;
+        using Vec = Eigen::VectorXd;
+
+        //static Vec dx_prev;                 // keep previous solution to warm-start
+        if (dx_prev.size() != b.size())     // resize on first call / size change
+            dx_prev = Vec::Zero(b.size());
+        Eigen::LeastSquaresConjugateGradient<Sp, Eigen::IncompleteCholesky<double>> lsq;
+        lsq.setTolerance(1e-10);            // tune; or make it relative to ||b||
+        lsq.setMaxIterations(2 * K.cols()); // don’t let it spin forever
+        lsq.compute(K);                     // recompute each time since entries change
+
+        auto dx = lsq.solveWithGuess(b, dx_prev);
+        dx_prev = dx;
     } else {
         if (verbose) {
             std::cerr << "[solve_dx_] Unknown Solver='" << Solver
@@ -1628,82 +1541,6 @@ Eigen::VectorXd problem_coupled::solve_dx_(Eigen::SparseMatrix<double>& Ktot,
                       << " iters=" << bicg.iterations()
                       << " err=" << (K * dx - b).norm() << "\n";
         }
-    }
-
-    if (verbose) {
-        const double abs_res = (K * dx + R).norm();
-        const double rel_res = abs_res / std::max(1e-30, R.norm());
-        std::cerr << "[solve_dx_] residual abs=" << abs_res << " rel=" << rel_res << "\n";
-    }
-
-
-
-//    if (true) {
-//        Timer t("SVD");
-//        // SVD is dense: convert sparse K -> dense
-//        Eigen::MatrixXd Kd = Eigen::MatrixXd(K);      // densify (watch memory/time)
-//        Eigen::VectorXd bd = b;                       // already dense
-//
-//        // Thin U/V keeps memory under control and is enough to solve
-//        Eigen::BDCSVD<Eigen::MatrixXd> svd;
-//        svd.compute(Kd, Eigen::ComputeThinU | Eigen::ComputeThinV);
-//
-//        auto dx2 = svd.solve(bd);
-//
-//        if (true) {
-//            const auto s = svd.singularValues();
-//            double smax = (s.size() ? s(0) : 0.0);
-//            double smin = (s.size() ? s.tail(1)(0) : 0.0);
-//            std::ptrdiff_t rank = svd.rank();
-//            std::cerr << "[solve_dx_] BDCSVD "
-//                      << "rank=" << rank << "/" << Kd.cols()
-//                      << " smax=" << smax << " smin=" << smin
-//                      << " cond~=" << (smin > 0.0 ? smax / smin : std::numeric_limits<double>::infinity())
-//                      << " residual=" << (Kd * dx2 - bd).norm()
-//                      << "\n";
-//        }
-//    }
-
-    if (true) {
-        Timer t("Sparse Qr");
-        auto test2 = K;
-        Eigen::SparseQR<Eigen::SparseMatrix<double>, Eigen::COLAMDOrdering<int>> qr;
-        qr.setPivotThreshold(1.0); // full pivoting effect (default is 1.0)
-        qr.compute(test2);
-        auto dx3 = qr.solve(b);
-        if (true || qr.info() != Eigen::Success) {
-            std::cerr << "[solve_dx_] SparseQR info=" << int(qr.info())
-                      << " rank=" << qr.rank() << "/" << K.cols()
-                      << " residual=" << (K * dx3 - b).norm() << "\n";
-        }
-    }
-
-    if (true){
-        Timer t("Time with guessing");
-        using Sp = Eigen::SparseMatrix<double>;
-        using Vec = Eigen::VectorXd;
-
-        //static Vec dx_prev;                 // keep previous solution to warm-start
-        if (dx_prev.size() != b.size())     // resize on first call / size change
-            dx_prev = Vec::Zero(b.size());
-
-        // Try a stronger preconditioner for the normal equations:
-        // (works when K^T K is SPD; with rank loss it still helps a bit)
-        Eigen::LeastSquaresConjugateGradient<Sp, Eigen::IncompleteCholesky<double>> lsq;
-
-        lsq.setTolerance(1e-10);            // tune; or make it relative to ||b||
-        lsq.setMaxIterations(2 * K.cols()); // don’t let it spin forever
-        lsq.compute(K);                     // recompute each time since entries change
-
-        // Warm-start
-        auto dx4 = lsq.solveWithGuess(b, dx_prev);
-
-//        if (verbose || lsq.info() != Eigen::Success) {
-//            std::cerr << "[solve_dx_] LSQCG info=" << int(lsq.info())
-//                      << " iters=" << lsq.iterations()
-//                      << " err=" << (K * dx4 - b).norm() << "\n";
-//        }
-        dx_prev = dx;
     }
     return dx;
 }
