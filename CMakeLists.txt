@@ -46,6 +46,6 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Extra optimization flags for Release
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG -march=native -ffast-math")
 
 add_compile_definitions(EIGEN_NO_DEBUG)

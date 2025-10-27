@@ -5,23 +5,22 @@
 #include <chrono>
 #include <vector>
 #include <iomanip>
-#include <string>
-#include "../Eigen/Dense"
-#include "../Eigen/Sparse"
 #include <fstream>
 #include <iostream>
-#include "../node/node.hpp"
-#include "../element/element.hpp"
-#include "../Eigen/SparseCholesky"
-#include "../Eigen/SparseLU"
-#include "../Eigen/IterativeLinearSolvers"
 #include <limits>
 #include <filesystem>
-#include <iostream>
 #include <stdexcept>
+
+#include "../Eigen/Dense"
+#include "../Eigen/Sparse"
+#include "../Eigen/SparseCholesky"
+#include "../Eigen/SparseQR"
+#include "../Eigen/SparseLU"
+#include "../Eigen/IterativeLinearSolvers"
 #include <Eigen/OrderingMethods>
 
-
+#include "../node/node.hpp"
+#include "../element/element.hpp"
 
 class problem_coupled {
 public:
@@ -56,17 +55,19 @@ public:
     int DOFs = 0;
     int GP_DOFs = 0;
 
-    // === Global solution structures ===
+    // === Global solution structures (standard DOFs) ===
     Eigen::VectorXd Rtot;
     Eigen::SparseMatrix<double> Ktot;
 
-    Eigen::VectorXd Rtot_GP;
-    Eigen::SparseMatrix<double> Ktot_GP;
+    // === GP solve: multi-RHS (columns = NGP_val) ===
+    Eigen::MatrixXd Rtot_GP;                    // size: GP_DOFs × NGP_val
+    Eigen::SparseMatrix<double> Ktot_GP;        // size: GP_DOFs × GP_DOFs
 
-
+    // === Linear solver ===
     std::string Solver;
     Eigen::SparseLU<Eigen::SparseMatrix<double>> slu_;
     bool slu_pattern_init_ = false;
+
     // === Constructor ===
     problem_coupled(int PD,
                     std::vector<Node>& NL,
@@ -87,42 +88,45 @@ public:
                     double tol);
 
 private:
+    // --- Setup & bookkeeping ---
     void Assign_BC(const std::string Corners);
     void Assign_GP_DOFs();
-    void problem_info();
-    void assemble(double dt);
-    void assemble_GP(double dt);
-    void update(const Eigen::VectorXd& dx);
-    void update_GP(const Eigen::VectorXd& dx_gp);
-    void update_time();
-    void downdate_time();
-    void post_process();
-    void output_step_info();
-    Eigen::MatrixXd Get_all_velocity();
     void Assign_DOF_DBC();
-    Eigen::VectorXd Residual(double dt);
-    std::pair<double, double> calculate_max_min_difference();
-    double calculate_overall_density();
-    void solve();
-    Eigen::VectorXd solve_dx_(Eigen::SparseMatrix<double>& Ktot,
-                              const Eigen::VectorXd& R,
-                              bool verbose = true);
-    Eigen::VectorXd dx_prev;
-//    Eigen::VectorXd solve_dx_(const Eigen::SparseMatrix<double>& Ktot,
-//                                               const Eigen::VectorXd& R,
-//                                               bool verbose =false);
-
-
-
     void Assign_DOF_PBC(const std::vector<int>& NLC,
                         const std::vector<int>& NLS,
                         const std::vector<int>& NLM,
                         const std::vector<int>& NLP);
+    void problem_info();
 
+    // --- Assembly ---
+    void assemble(double dt);
+    void assemble_GP(double dt);
 
+    // --- Updates ---
+    void update(const Eigen::VectorXd& dx);
+    void update_GP(const Eigen::MatrixXd& dx_gp);   // <-- changed to MatrixXd
+    void update_time();
+    void downdate_time();
 
+    // --- Reporting ---
+    void post_process();
+    void output_step_info();
+
+    // --- Utilities ---
+    Eigen::MatrixXd Get_all_velocity();
+    Eigen::VectorXd Residual(double dt);
+    std::pair<double, double> calculate_max_min_difference();
+    double calculate_overall_density();
+
+    // --- Solve loop ---
+    void solve();
+
+    // --- Linear solve helper ---
+    Eigen::VectorXd solve_dx_(Eigen::SparseMatrix<double>& Ktot,
+                              const Eigen::VectorXd& R,
+                              bool verbose = true);
+
+    Eigen::VectorXd dx_prev;
 };
-
-
 
 #endif // PROBLEM_COUPLED_HPP
