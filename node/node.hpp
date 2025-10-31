@@ -25,7 +25,7 @@ public:
     Eigen::VectorXd GP_BC;     // Gauss point boundary conditions
     Eigen::VectorXd GP_DOF;    // Gauss point DOFs
     Eigen::VectorXd GP_vals;   // Gauss point values
-
+    bool BCset;
     // Constructor
     Node(int Nr, int PD, const Eigen::VectorXd& X_input,
          const Eigen::VectorXd& C, const Eigen::VectorXd& V,

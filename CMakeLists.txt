@@ -29,6 +29,7 @@ set(SRCS
         postprocess/postprocess.hpp
         postprocess/postprocess.cpp
         element/shape_cache.hpp
+        config.ini
 )
 
 add_executable(coupled_field_problem_2 ${SRCS})

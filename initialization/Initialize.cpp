@@ -50,7 +50,6 @@ Initialize(int PD, const Eigen::MatrixXd &nl, const Eigen::MatrixXd &el_1, const
         double C = 0.0;
         Eigen::VectorXd V = Eigen::VectorXd::Zero(PD);
 
-        // Make sure you have: #include <cmath> and <random> above
 
         if (field(0)) {                 // MATLAB field(1) -> C++ field(0)
             densityCounter++;

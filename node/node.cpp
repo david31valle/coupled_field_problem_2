@@ -35,6 +35,8 @@ Node::Node(int Nr, int PD, const Eigen::VectorXd& X_input,
     GP_BC   = Eigen::VectorXd::Ones(gp_size) * field_input[0];
     GP_DOF  = Eigen::VectorXd::Zero(gp_size);
     GP_vals = Eigen::VectorXd::Zero(gp_size);
+
+    BCset = false;
 }
 
 

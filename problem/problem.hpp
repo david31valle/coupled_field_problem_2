@@ -55,7 +55,7 @@ public:
     // === DOF tracking ===
     int DOFs = 0;
     int GP_DOFs = 0;
-
+    bool BCset;
     // === Global solution structures ===
     Eigen::VectorXd Rtot;
     Eigen::SparseMatrix<double> Ktot;

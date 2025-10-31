@@ -29,7 +29,7 @@ private:
 
 int main(int argc, char** argv) {
     Timer t("Program run");
-    std::string cfgPath = "config.ini";
+    std::string cfgPath = "C:\\Users\\drva_\\CLionProjects\\coupled_field_problem_2\\config.ini";
     for (int i=1; i<argc; ++i) {
         std::string a(argv[i]);
         if (a.rfind("--config=", 0) == 0) { cfgPath = a.substr(9); }
@@ -70,4 +70,3 @@ int main(int argc, char** argv) {
 
     return 0;
 }
-
