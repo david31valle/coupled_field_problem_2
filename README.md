@@ -43,7 +43,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 ```
 
-This produces the executable inside the `output/` directory.
+This produces the executable inside the `output/` directory. This may take a while.
 
 ---
 
@@ -53,8 +53,9 @@ This produces the executable inside the `output/` directory.
 ./output/coupled_field_problem_2
 ```
 
-> If you changed the target name in `CMakeLists.txt`, run that executable instead.
-> After the run is complete, the VTK output files can be then found in `output/vtk_output`.
+- If you changed the target name in `CMakeLists.txt`, run that executable instead.
+- After the run is complete, the VTK output files can be then found in `output/vtk_output`.
+- If you need to run again with different sets of parameters, save the vtk_output files in another directory and delete them before starting the new run. 
 
 ---
 
