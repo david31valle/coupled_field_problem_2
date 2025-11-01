@@ -569,21 +569,19 @@ void problem_coupled::Assign_DOF_PBC(const std::vector<int>& NLC,
 
 void problem_coupled::Assign_GP_DOFs() {
     int GP_dofs = 0;
-    int NoNs = Node_List.size();
-
+    const int NoNs = static_cast<int>(Node_List.size());
     for (int i = 0; i < NoNs; ++i) {
-        Eigen::VectorXd& BC = Node_List[i].GP_BC;
-        Eigen::VectorXd& DOF = Node_List[i].GP_DOF;
-
-        // If any entry in GP_BC is 1, assign a new DOF index to all GP_DOF entries
+        Eigen::VectorXd& BC  = Node_List[i].GP_BC;   // length = NGP_val  (e.g., PD*PD)
+        Eigen::VectorXd& DOF = Node_List[i].GP_DOF;  // length = NGP_val
         if ((BC.array() == 1).any()) {
             ++GP_dofs;
-            DOF = Eigen::VectorXd::Constant(BC.size(), GP_dofs);
-            Node_List[i].GP_DOF = DOF;
+            // all GP components at the same node share ONE (the same) DOF id
+            DOF.setConstant(BC.size(), static_cast<double>(GP_dofs));
+        } else {
+            DOF.setZero(BC.size());
         }
     }
-
-    GP_DOFs = GP_dofs;  // store total number of Gauss point DOFs
+    GP_DOFs = GP_dofs;
 }
 
 
@@ -644,18 +642,15 @@ void problem_coupled::update(const Eigen::VectorXd& dx) {
 
 }
 
-void problem_coupled::update_GP(const Eigen::VectorXd& dx_gp) {
-    int NoNs = Node_List.size();
-
+void problem_coupled::update_GP(const Eigen::MatrixXd& dx_gp) {
+    const int NoNs = static_cast<int>(Node_List.size());
+    if (dx_gp.rows() == 0) return;
     for (int i = 0; i < NoNs; ++i) {
-        const Eigen::VectorXd& BC  = Node_List[i].GP_BC;
-        const Eigen::VectorXd& DOF = Node_List[i].GP_DOF;
-
+        const auto& BC  = Node_List[i].GP_BC;
+        const auto& DOF = Node_List[i].GP_DOF;
         if ((BC.array() == 1).any()) {
-            int dof_idx = static_cast<int>(DOF(0)) - 1;  // 0-based index
-            if (dof_idx >= 0 && dof_idx < dx_gp.size()) {
-                Node_List[i].GP_vals = Eigen::VectorXd::Constant(BC.size(), dx_gp(dof_idx));
-            }
+            const int d = static_cast<int>(DOF(0)) - 1;
+            if (0 <= d && d < dx_gp.rows()) Node_List[i].GP_vals = dx_gp.row(d).transpose();
         }
     }
 }
@@ -909,91 +904,61 @@ void problem_coupled::assemble(double dt) {
 
 }
 
-void problem_coupled::assemble_GP(double dt)
-{
+void problem_coupled::assemble_GP(double dt) {
     const int NoEs = static_cast<int>(Element_List.size());
     const int NoNs = static_cast<int>(Node_List.size());
-    if (NoEs == 0 || NoNs == 0 || GP_DOFs <= 0) {
-        Rtot_GP = Eigen::VectorXd();
-        Ktot_GP = Eigen::SparseMatrix<double>();
+    if (NoEs == 0 || NoNs == 0 || GP_DOFs == 0) {
+        Rtot_GP.resize(0,0);
+        Ktot_GP.resize(0,0);
         return;
     }
+    const int NPE1 = Element_List[0].NPE1;
+    const int NGP_val = static_cast<int>(Node_List[0].GP_BC.size()); // PD*PD
 
-    const int NPE1    = Element_List[0].NPE1;
-    const int NGP_val = static_cast<int>(Node_List[0].GP_BC.size()); // # GP values per node
-
-    // MATLAB: Rtot_GP = zeros(GP_DOFs, NGP_val)
-    // We store it flattened: row-major (row * NGP_val + s)
-    Rtot_GP = Eigen::VectorXd::Zero(GP_DOFs * NGP_val);
-
+    Rtot_GP.setZero(GP_DOFs, NGP_val);
     std::vector<Eigen::Triplet<double>> triplets;
-    triplets.reserve(static_cast<size_t>(NoEs) * NPE1 * NPE1); // rough guess
+    triplets.reserve(NoEs * NPE1 * NPE1);
 
     for (int e = 0; e < NoEs; ++e) {
-        // MATLAB: [R, K] = EL(e).RK_GP(dt, NGP_val);
-        auto [R, K] = Element_List[e].RK_GP(dt, NGP_val);
-        const auto& NdL1 = Element_List[e].NdL1; // 1-based node ids
+        auto ek = Element_List[e].RK_GP(dt, NGP_val);
+        const Eigen::MatrixXd& R = ek.first;    // (NPE1 × NGP_val)
+        const Eigen::MatrixXd& K = ek.second;   // (NPE1 × NPE1)
+        const auto& NdL1 = Element_List[e].NdL1;
 
-        // In your MATLAB here dim = 1, but keep it general if you change it later.
-        const int dim = std::max(1, static_cast<int>(R.rows() / std::max(1, NPE1)));
-
-        for (int s = 0; s < NGP_val; ++s) {
-            for (int i = 0; i < NPE1; ++i) {
-                const int node_i = static_cast<int>(NdL1(i)) - 1;  // 0-based
-                const auto& BC_i  = Node_List[node_i].GP_BC;
-                const auto& DOF_i = Node_List[node_i].GP_DOF;
-
-                const int slots = std::min<int>(dim, static_cast<int>(BC_i.size()));
-                for (int p = 0; p < slots; ++p) {                  // MATLAB p=1..dim → C++ p=0..dim-1
-                    if (BC_i(p) != 1.0) continue;
-
-                    const int g = static_cast<int>(DOF_i(p)) - 1;  // 0-based global GP-DOF
-                    if (g < 0) continue;
-
-                    const int rloc = i * dim + p;                  // (i-1)*dim + p  → 0-based
-                    if (rloc < 0 || rloc >= R.rows() || s >= R.cols()) continue;
-
-                    const int idx = g * NGP_val + s;               // flatten (row,s)
-                    Rtot_GP(idx) += R(rloc, s);
-                }
+        // R
+        for (int i = 0; i < NPE1; ++i) {
+            const int node_i = static_cast<int>(NdL1(i)) - 1;
+            const auto& BC  = Node_List[node_i].GP_BC;
+            const auto& DOF = Node_List[node_i].GP_DOF;
+            if ((BC.array() == 1).any()) {
+                const int gi = static_cast<int>(DOF(0)) - 1;
+                if (gi >= 0) Rtot_GP.row(gi) += R.row(i);
             }
         }
 
-
+        // K
         for (int i = 0; i < NPE1; ++i) {
             const int node_i = static_cast<int>(NdL1(i)) - 1;
-            const auto& BC_i  = Node_List[node_i].GP_BC;
-            const auto& DOF_i = Node_List[node_i].GP_DOF;
-
-            const int slots_i = std::min<int>(dim, static_cast<int>(BC_i.size()));
-            for (int p = 0; p < slots_i; ++p) {
-                if (BC_i(p) != 1.0) continue;
-                const int grow = static_cast<int>(DOF_i(p)) - 1;   // 0-based
-                if (grow < 0) continue;
-
+            const auto& BCi  = Node_List[node_i].GP_BC;
+            const auto& DOFi = Node_List[node_i].GP_DOF;
+            if ((BCi.array() == 1).any()) {
+                const int gi = static_cast<int>(DOFi(0)) - 1;
+                if (gi < 0) continue;
                 for (int j = 0; j < NPE1; ++j) {
                     const int node_j = static_cast<int>(NdL1(j)) - 1;
-                    const auto& BC_j  = Node_List[node_j].GP_BC;
-                    const auto& DOF_j = Node_List[node_j].GP_DOF;
-
-                    const int slots_j = std::min<int>(dim, static_cast<int>(BC_j.size()));
-                    for (int q = 0; q < slots_j; ++q) {
-                        if (BC_j(q) != 1.0) continue;
-                        const int gcol = static_cast<int>(DOF_j(q)) - 1; // 0-based
-                        if (gcol < 0) continue;
-
-                        const int rloc = i * dim + p;
-                        const int cloc = j * dim + q;
-                        if (rloc < 0 || cloc < 0 || rloc >= K.rows() || cloc >= K.cols()) continue;
-
-                        triplets.emplace_back(grow, gcol, K(rloc, cloc));
+                    const auto& BCj  = Node_List[node_j].GP_BC;
+                    const auto& DOFj = Node_List[node_j].GP_DOF;
+                    if ((BCj.array() == 1).any()) {
+                        const int gj = static_cast<int>(DOFj(0)) - 1;
+                        if (gj < 0) continue;
+                        triplets.emplace_back(gi, gj, K(i, j));
                     }
                 }
             }
         }
     }
 
-    Ktot_GP = Eigen::SparseMatrix<double>(GP_DOFs, GP_DOFs);
+    Ktot_GP.resize(GP_DOFs, GP_DOFs);
     Ktot_GP.setFromTriplets(triplets.begin(), triplets.end());
 }
 
@@ -1241,15 +1206,18 @@ void problem_coupled::solve() {
             //Solver = "LSQCG";
 
             // ---------- Initial output & predictor residual ----------
-
             if (error_counter == 1) {
-                if (counter == 1 && GP_vals == "On") {
+                if (counter == 1 && GP_vals == "On" && GP_DOFs > 0) {
                     assemble_GP(dt);
-                    Eigen::VectorXd dx_GP = solve_dx_(Ktot_GP, Rtot_GP, false);
-                    update_GP(dx_GP);
+                    const int NGP_val = static_cast<int>(Node_List[0].GP_BC.size());
+                    Eigen::MatrixXd dx_GP_mat(GP_DOFs, NGP_val);
+                    for (int s = 0; s < NGP_val; ++s) {
+                        dx_GP_mat.col(s) = solve_dx_(Ktot_GP, Rtot_GP.col(s), false);
+                    }
+                    update_GP(dx_GP_mat);
                 }
 
-                double Norm_R0 = Rtot.norm();
+                Norm_R0 = Rtot.norm();
                 std::cout << "Residual Norm at Predictor                : "
                           << std::scientific << Rtot.norm()
                           << " , normalized : 1\n";
