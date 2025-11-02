@@ -38,9 +38,9 @@ cd /path/to/your/project-folder
 ## 3) Configure and build (out-of-source)
 
 ```bash
-mkdir -p build
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j"$(nproc)"
+mkdir -p output
+cmake -S . -B output -DCMAKE_BUILD_TYPE=Release
+cmake --build output -j"$(nproc)"
 ```
 
 This produces the executable inside the `output/` directory. This may take a while.
