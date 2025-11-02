@@ -556,7 +556,7 @@ void problem_coupled::Assign_DOF_PBC(const std::vector<int>& NLC,
     }
 
     // ===== Plus nodes =====
-    // MATLAB uses the same i to pair NLP(i) with NLM(i)
+
     const int nPair = std::min(NoPNs, NoMNs); // safety; MATLAB assumes equal length
     for (int i = 0; i < nPair; ++i) {
         const int idxP = NLP[i];
@@ -1085,11 +1085,9 @@ std::pair<double, double> problem_coupled::calculate_max_min_difference() {
 
 void problem_coupled::post_process() {
     // Minimal stub so you can compile/run. Hook your 1D/2D/3D exporters here.
-    // e.g., write nodal c and v to file if you want.
+    // write nodal c and v to file if you want.
     // Build "vtk/step_XXXX.vtk" (ParaView will group the series automatically)
-    // MATLAB-like outputs (1D/2D/3D) → VTK POLYDATA files in ./vtk
-    // Auto-detects PD from nodes and writes the matching set for this step.
-    // Create configuration for post-processing
+
         // --- 1. Configuration ---
     PostProcess::Config config;
     config.output_directory = "vtk_output";
@@ -1203,7 +1201,6 @@ void problem_coupled::solve() {
             } else {
                 Solver = "LSQCG";//Least square problem using CG
             }
-            //Solver = "LSQCG";
 
             // ---------- Initial output & predictor residual ----------
             if (error_counter == 1) {
@@ -1334,7 +1331,7 @@ Eigen::VectorXd problem_coupled::solve_dx_(Eigen::SparseMatrix<double>& Ktot,
         slu.factorize(K);
         dx = slu.solve(b);
         if (verbose || slu.info() != Eigen::Success) {
-            std::cerr << "[solve_dx_] SparseLU info=" << int(slu.info()) << "\n";
+            //std::cerr << "[solve_dx_] SparseLU info=" << int(slu.info()) << "\n";
         }
     } else if (Solver == "LSQCG" || Solver == "LeastSquaresConjugateGradient") {
         using Sp = Eigen::SparseMatrix<double>;

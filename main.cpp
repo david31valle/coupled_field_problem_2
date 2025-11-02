@@ -4,7 +4,7 @@
 #include <string>
 #include <tuple>
 #include "preprocess/mesh.hpp"
-#include "initialization/initialize.hpp"
+#include "initialization/Initialize.hpp"
 #include "utils/utils.hpp"
 #include "utils/Config.hpp"
 #include "problem/problem.hpp"
@@ -29,7 +29,7 @@ private:
 
 int main(int argc, char** argv) {
     Timer t("Program run");
-    std::string cfgPath = "config.ini";
+    std::string cfgPath = "config.ini"; //Here you can put your absolute path for the file
     for (int i=1; i<argc; ++i) {
         std::string a(argv[i]);
         if (a.rfind("--config=", 0) == 0) { cfgPath = a.substr(9); }

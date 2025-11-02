@@ -1,4 +1,4 @@
-#include "Node.hpp"
+#include "node.hpp"
 
 Node::Node(int Nr, int PD, const Eigen::VectorXd& X_input,
            const Eigen::VectorXd& C, const Eigen::VectorXd& V,

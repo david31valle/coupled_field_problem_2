@@ -50,23 +50,26 @@ This produces the executable inside the `output/` directory. This may take a whi
 ## 4) Run the program
 
 ```bash
-./output/coupled_field_problem_2
+cd/output
+./coupled_field_problem_2
 ```
 
-- If you changed the target name in `CMakeLists.txt`, run that executable instead.
-- After the run is complete, the VTK output files can be then found in `output/vtk_output`.
+- Make changes to parameters in the `config.ini` file before running the executable.
+- If you changed the target name in `CMakeLists.txt`, run that executable instead. In this case, "coupled_field_problem_2".
+- After the run is complete, the VTK output files can be then found in `vtk_output`.
 - If you need to run again with different sets of parameters, save the vtk_output files in another directory and delete them before starting the new run. 
 
 ---
 
 ## 5) Clean rebuild (only if needed)
 
-If a build fails or you want to start fresh:
-```bash
-rm -rf build
-mkdir -p build
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j"$(nproc)"
+If a build fails, or you want to start fresh:
+```bash 
+cd ..
+rm -rf output
+mkdir -p output
+cmake -S . -B output -DCMAKE_BUILD_TYPE=Release
+cmake --build output -j"$(nproc)"
 ```
 
 ---
